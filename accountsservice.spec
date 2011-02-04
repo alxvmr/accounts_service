@@ -12,7 +12,7 @@ License: GPLv3+
 Url: http://www.fedoraproject.org/wiki/Features/UserAccountDialog
 #VCS: git:git://git.freedesktop.org/accountsservice
 
-Source: http://mclasen.fedorapeople.org/accounts/accountsservice-%version.tar.bz2
+Source: http://mclasen.fedorapeople.org/accounts/accountsservice-%version.tar
 
 BuildRequires: intltool
 BuildRequires: glib2-devel libgio-devel

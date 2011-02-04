@@ -1,0 +1,13 @@
+object b8118bf8cce644dd77d8d0fdea37b908366a5541
+type commit
+tag 0.6.3
+tagger Ray Strode <rstrode@redhat.com> 1296576903 -0500
+
+Changes in 0.6.3
+================
+
+* Add more getters to client library
+
+* Add an initial cut at a setter api
+
+* Add XSession property type
