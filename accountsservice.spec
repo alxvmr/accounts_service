@@ -69,6 +69,7 @@ GObject introspection devel data for the accountsservice library
 %setup
 
 %build
+%autoreconf
 %configure --disable-static --with-systemdsystemunitdir=%systemdsystemunitdir
 %make_build
 
