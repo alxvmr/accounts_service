@@ -3,7 +3,7 @@
 %define systemdsystemunitdir /lib/systemd/system
 
 Name: accountsservice
-Version: 0.6.3
+Version: 0.6.5
 Release: alt1
 Summary: D-Bus interfaces for querying and manipulating user account information
 
@@ -106,5 +106,8 @@ GObject introspection devel data for the accountsservice library
 %_datadir/gir-1.0/AccountsService-1.0.gir
 
 %changelog
+* Thu Mar 10 2011 Alexey Shabalin <shaba@altlinux.ru> 0.6.5-alt1
+- 0.6.5
+
 * Fri Feb 04 2011 Alexey Shabalin <shaba@altlinux.ru> 0.6.3-alt1
 - initial build for ALT Linux Sisyphus
