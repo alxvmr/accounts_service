@@ -1,9 +1,9 @@
 %define _localstatedir %_var
 %define _libexecdir %_prefix/libexec
-%define systemdsystemunitdir /lib/systemd/system
+
 
 Name: accountsservice
-Version: 0.6.5
+Version: 0.6.8
 Release: alt1
 Summary: D-Bus interfaces for querying and manipulating user account information
 
@@ -70,7 +70,7 @@ GObject introspection devel data for the accountsservice library
 
 %build
 %autoreconf
-%configure --disable-static --with-systemdsystemunitdir=%systemdsystemunitdir
+%configure --disable-static --with-systemdsystemunitdir=%systemd_unitdir
 %make_build
 
 %install
@@ -89,7 +89,7 @@ GObject introspection devel data for the accountsservice library
 %dir %_localstatedir/lib/AccountsService/
 %dir %_localstatedir/lib/AccountsService/users
 %dir %_localstatedir/lib/AccountsService/icons
-%systemdsystemunitdir/accounts-daemon.service
+%systemd_unitdir/accounts-daemon.service
 
 %files -n lib%name
 %_libdir/libaccountsservice.so.*
@@ -106,6 +106,10 @@ GObject introspection devel data for the accountsservice library
 %_datadir/gir-1.0/AccountsService-1.0.gir
 
 %changelog
+* Fri Apr 08 2011 Alexey Shabalin <shaba@altlinux.ru> 0.6.8-alt1
+- 0.6.8
+- use global %%systemd_unitdir macros
+
 * Thu Mar 10 2011 Alexey Shabalin <shaba@altlinux.ru> 0.6.5-alt1
 - 0.6.5
 
