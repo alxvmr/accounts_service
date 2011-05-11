@@ -3,7 +3,7 @@
 
 
 Name: accountsservice
-Version: 0.6.8
+Version: 0.6.10
 Release: alt1
 Summary: D-Bus interfaces for querying and manipulating user account information
 
@@ -106,6 +106,9 @@ GObject introspection devel data for the accountsservice library
 %_datadir/gir-1.0/AccountsService-1.0.gir
 
 %changelog
+* Wed May 11 2011 Alexey Shabalin <shaba@altlinux.ru> 0.6.10-alt1
+- 0.6.10
+
 * Fri Apr 08 2011 Alexey Shabalin <shaba@altlinux.ru> 0.6.8-alt1
 - 0.6.8
 - use global %%systemd_unitdir macros
