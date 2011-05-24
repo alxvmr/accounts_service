@@ -3,16 +3,17 @@
 
 
 Name: accountsservice
-Version: 0.6.10
+Version: 0.6.12
 Release: alt1
 Summary: D-Bus interfaces for querying and manipulating user account information
 
 Group: System/Base
 License: GPLv3+
 Url: http://www.fedoraproject.org/wiki/Features/UserAccountDialog
-#VCS: git:git://git.freedesktop.org/accountsservice
+#VCS: git://anongit.freedesktop.org/accountsservice
 
-Source: http://mclasen.fedorapeople.org/accounts/accountsservice-%version.tar
+Source: %name-%version.tar
+Patch1: %name-%version-%release.patch
 
 BuildRequires: intltool
 BuildRequires: glib2-devel libgio-devel
@@ -67,6 +68,7 @@ GObject introspection devel data for the accountsservice library
 
 %prep
 %setup
+%patch1 -p1
 
 %build
 %autoreconf
@@ -106,6 +108,9 @@ GObject introspection devel data for the accountsservice library
 %_datadir/gir-1.0/AccountsService-1.0.gir
 
 %changelog
+* Tue May 24 2011 Alexey Shabalin <shaba@altlinux.ru> 0.6.12-alt1
+- pre 0.6.13
+
 * Wed May 11 2011 Alexey Shabalin <shaba@altlinux.ru> 0.6.10-alt1
 - 0.6.10
 
