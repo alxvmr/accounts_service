@@ -3,7 +3,7 @@
 
 
 Name: accountsservice
-Version: 0.6.15
+Version: 0.6.17
 Release: alt1
 Summary: D-Bus interfaces for querying and manipulating user account information
 
@@ -17,12 +17,12 @@ Patch1: %name-%version-%release.patch
 
 BuildRequires: intltool
 BuildRequires: glib2-devel libgio-devel
-BuildRequires: libdbus-glib-devel
 BuildRequires: libpolkit1-devel
 BuildRequires: gobject-introspection-devel
+BuildRequires: vala vala-tools
+BuildRequires: libsystemd-login-devel libsystemd-daemon-devel
 
 Requires: polkit
-Requires: ConsoleKit
 Requires: shadow-utils
 Requires: lib%name = %version-%release
 
@@ -94,20 +94,25 @@ GObject introspection devel data for the accountsservice library
 %systemd_unitdir/accounts-daemon.service
 
 %files -n lib%name
-%_libdir/libaccountsservice.so.*
+%_libdir/*.so.*
 
 %files -n lib%name-gir
-%_libdir/girepository-1.0/AccountsService-1.0.typelib
+%_typelibdir/*.typelib
 
 %files -n lib%name-devel
-%_includedir/accountsservice-1.0
-%_libdir/libaccountsservice.so
+%_includedir/*
+%_libdir/*.so
 %_pkgconfigdir/*.pc
+%_vapidir/*
 
 %files -n lib%name-gir-devel
-%_datadir/gir-1.0/AccountsService-1.0.gir
+%_girdir/*.gir
 
 %changelog
+* Fri Apr 06 2012 Alexey Shabalin <shaba@altlinux.ru> 0.6.17-alt1
+- 0.6.17
+- build with libsystemd-login and libsystemd-daemon
+
 * Fri Oct 21 2011 Alexey Shabalin <shaba@altlinux.ru> 0.6.15-alt1
 - 0.6.15
 
