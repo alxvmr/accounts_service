@@ -3,7 +3,7 @@
 
 
 Name: accountsservice
-Version: 0.6.17
+Version: 0.6.21
 Release: alt1
 Summary: D-Bus interfaces for querying and manipulating user account information
 
@@ -17,10 +17,10 @@ Patch1: %name-%version-%release.patch
 
 BuildRequires: intltool
 BuildRequires: glib2-devel libgio-devel
-BuildRequires: libpolkit1-devel
+BuildRequires: libpolkit-devel
 BuildRequires: gobject-introspection-devel
 BuildRequires: vala vala-tools
-BuildRequires: libsystemd-login-devel libsystemd-daemon-devel
+BuildRequires: libsystemd-login-devel >= 43 libsystemd-daemon-devel
 
 Requires: polkit
 Requires: shadow-utils
@@ -72,7 +72,10 @@ GObject introspection devel data for the accountsservice library
 
 %build
 %autoreconf
-%configure --disable-static --with-systemdsystemunitdir=%systemd_unitdir
+%configure \
+	--disable-static \
+	--enable-systemd \
+	--with-systemdsystemunitdir=%_unitdir
 %make_build
 
 %install
@@ -91,7 +94,7 @@ GObject introspection devel data for the accountsservice library
 %dir %_localstatedir/lib/AccountsService/
 %dir %_localstatedir/lib/AccountsService/users
 %dir %_localstatedir/lib/AccountsService/icons
-%systemd_unitdir/accounts-daemon.service
+%_unitdir/accounts-daemon.service
 
 %files -n lib%name
 %_libdir/*.so.*
@@ -109,6 +112,9 @@ GObject introspection devel data for the accountsservice library
 %_girdir/*.gir
 
 %changelog
+* Mon May 21 2012 Alexey Shabalin <shaba@altlinux.ru> 0.6.21-alt1
+- 0.6.21
+
 * Fri Apr 06 2012 Alexey Shabalin <shaba@altlinux.ru> 0.6.17-alt1
 - 0.6.17
 - build with libsystemd-login and libsystemd-daemon
