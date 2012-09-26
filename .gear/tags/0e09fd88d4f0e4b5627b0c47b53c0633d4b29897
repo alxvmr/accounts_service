@@ -1,0 +1,13 @@
+object 3b7c7dc5d9e3a8b235622597aa53ab17ef863f87
+type commit
+tag 0.6.25
+tagger Ray Strode <rstrode@redhat.com> 1348535027 -0400
+
+0.6.25
+
+* Uninitialized variable fix
+* Typo fix
+* Create data dirs just-in-time
+* Ignore closing sessions for is_logged_in test
+* Disable NULL user for delete_user call
+* Translation updates
