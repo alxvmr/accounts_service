@@ -15,7 +15,7 @@ Url: http://www.fedoraproject.org/wiki/Features/UserAccountDialog
 Source: %name-%version.tar
 Patch1: %name-%version-%release.patch
 
-BuildRequires: intltool
+BuildRequires: intltool gtk-doc
 BuildRequires: glib2-devel libgio-devel
 BuildRequires: libpolkit-devel
 BuildRequires: gobject-introspection-devel
