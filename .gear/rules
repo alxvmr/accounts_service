@@ -1,3 +1,5 @@
 tar: @version@:.
 diff: @version@:. patches/altlinux:.
+copy: *.conf
+
 

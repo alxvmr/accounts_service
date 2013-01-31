@@ -13,6 +13,7 @@ Url: http://www.fedoraproject.org/wiki/Features/UserAccountDialog
 #VCS: git://anongit.freedesktop.org/accountsservice
 
 Source: %name-%version.tar
+Source2: %name.conf
 Patch1: %name-%version-%release.patch
 
 BuildRequires: intltool gtk-doc
@@ -80,6 +81,7 @@ GObject introspection devel data for the accountsservice library
 
 %install
 %make DESTDIR=%buildroot install
+install -m644 -p -D %SOURCE2 %buildroot%_sysconfdir/%name.conf
 
 %find_lang accounts-service
 
@@ -95,6 +97,9 @@ GObject introspection devel data for the accountsservice library
 %dir %_localstatedir/lib/AccountsService/users
 %dir %_localstatedir/lib/AccountsService/icons
 %_unitdir/accounts-daemon.service
+%dir %_libdir/%name
+%_libdir/%name/%name.conf
+%config(noreplace) %_sysconfdir/%name.conf
 
 %files -n lib%name
 %_libdir/*.so.*
