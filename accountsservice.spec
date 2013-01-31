@@ -4,7 +4,7 @@
 
 Name: accountsservice
 Version: 0.6.30
-Release: alt1
+Release: alt2
 Summary: D-Bus interfaces for querying and manipulating user account information
 
 Group: System/Base
@@ -112,6 +112,10 @@ GObject introspection devel data for the accountsservice library
 %_girdir/*.gir
 
 %changelog
+* Thu Jan 31 2013 Alexey Shabalin <shaba@altlinux.ru> 0.6.30-alt2
+- merge with github.com/mmonaco/accountsservice/exclude-v3 for
+  add config with excluded users
+
 * Mon Jan 28 2013 Alexey Shabalin <shaba@altlinux.ru> 0.6.30-alt1
 - 0.6.30
 
