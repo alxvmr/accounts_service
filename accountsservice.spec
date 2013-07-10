@@ -13,6 +13,7 @@ Url: http://www.fedoraproject.org/wiki/Features/UserAccountDialog
 #VCS: git://anongit.freedesktop.org/accountsservice
 
 Source: %name-%version.tar
+Patch1: %name-%version-%release.patch
 
 BuildRequires: intltool gtk-doc
 BuildRequires: glib2-devel libgio-devel
@@ -67,6 +68,7 @@ GObject introspection devel data for the accountsservice library
 
 %prep
 %setup
+%patch1 -p1
 
 %build
 %autoreconf
