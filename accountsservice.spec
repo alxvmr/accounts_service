@@ -3,8 +3,8 @@
 
 
 Name: accountsservice
-Version: 0.6.30
-Release: alt2
+Version: 0.6.34
+Release: alt1
 Summary: D-Bus interfaces for querying and manipulating user account information
 
 Group: System/Base
@@ -13,15 +13,13 @@ Url: http://www.fedoraproject.org/wiki/Features/UserAccountDialog
 #VCS: git://anongit.freedesktop.org/accountsservice
 
 Source: %name-%version.tar
-Source2: %name.conf
-Patch1: %name-%version-%release.patch
 
 BuildRequires: intltool gtk-doc
 BuildRequires: glib2-devel libgio-devel
 BuildRequires: libpolkit-devel
 BuildRequires: gobject-introspection-devel
 BuildRequires: vala vala-tools
-BuildRequires: libsystemd-login-devel >= 186 libsystemd-daemon-devel systemd-devel
+BuildRequires: libsystemd-login-devel >= 186 systemd-devel
 
 Requires: polkit
 Requires: shadow-utils
@@ -69,19 +67,18 @@ GObject introspection devel data for the accountsservice library
 
 %prep
 %setup
-%patch1 -p1
 
 %build
 %autoreconf
 %configure \
 	--disable-static \
 	--enable-systemd \
+	--enable-admin-group=wheel \
 	--with-systemdsystemunitdir=%_unitdir
 %make_build
 
 %install
 %make DESTDIR=%buildroot install
-install -m644 -p -D %SOURCE2 %buildroot%_sysconfdir/%name.conf
 
 %find_lang accounts-service
 
@@ -97,9 +94,6 @@ install -m644 -p -D %SOURCE2 %buildroot%_sysconfdir/%name.conf
 %dir %_localstatedir/lib/AccountsService/users
 %dir %_localstatedir/lib/AccountsService/icons
 %_unitdir/accounts-daemon.service
-%dir %_libdir/%name
-%_libdir/%name/%name.conf
-%config(noreplace) %_sysconfdir/%name.conf
 
 %files -n lib%name
 %_libdir/*.so.*
@@ -117,6 +111,10 @@ install -m644 -p -D %SOURCE2 %buildroot%_sysconfdir/%name.conf
 %_girdir/*.gir
 
 %changelog
+* Wed Jul 10 2013 Alexey Shabalin <shaba@altlinux.ru> 0.6.34-alt1
+- 0.6.34
+- drop patches from github.com/mmonaco/accountsservice
+
 * Thu Jan 31 2013 Alexey Shabalin <shaba@altlinux.ru> 0.6.30-alt2
 - merge with github.com/mmonaco/accountsservice/exclude-v3 for
   add config with excluded users
