@@ -49,6 +49,7 @@
 #define PATH_SHADOW "/etc/shadow"
 #define PATH_NOLOGIN "/sbin/nologin"
 #define PATH_FALSE "/bin/false"
+#define PATH_DEVNULL "/dev/null"
 #define PATH_GDM_CUSTOM "/etc/gdm/custom.conf"
 #ifdef HAVE_UTMPX_H
 #define PATH_WTMP _PATH_WTMPX
@@ -180,7 +181,7 @@ daemon_local_user_is_excluded (Daemon      *daemon,
         ret = FALSE;
 
         if (shell != NULL) {
-                char *basename, *nologin_basename, *false_basename;
+                char *basename, *nologin_basename, *false_basename, *devnull_basename;
 
 #ifdef HAVE_GETUSERSHELL
                 char *valid_shell;
@@ -198,6 +199,7 @@ daemon_local_user_is_excluded (Daemon      *daemon,
                 basename = g_path_get_basename (shell);
                 nologin_basename = g_path_get_basename (PATH_NOLOGIN);
                 false_basename = g_path_get_basename (PATH_FALSE);
+                devnull_basename = g_path_get_basename (PATH_DEVNULL);
 
                 if (shell[0] == '\0') {
                         ret = TRUE;
@@ -205,11 +207,14 @@ daemon_local_user_is_excluded (Daemon      *daemon,
                         ret = TRUE;
                 } else if (g_strcmp0 (basename, false_basename) == 0) {
                         ret = TRUE;
+                } else if (g_strcmp0 (basename, devnull_basename) == 0) {
+                        ret = TRUE;
                 }
 
                 g_free (basename);
                 g_free (nologin_basename);
                 g_free (false_basename);
+                g_free (devnull_basename);
         }
 
         if (password_hash != NULL) {
