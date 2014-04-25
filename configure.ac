@@ -187,7 +187,7 @@ AC_SUBST(WARN_CFLAGS)
 
 AC_CHECK_HEADERS([shadow.h utmpx.h])
 
-AC_CHECK_FUNCS([fgetpwent])
+AC_CHECK_FUNCS([fgetpwent getusershell])
 
 dnl ---------------------------------------------------------------------------
 dnl - gtk-doc Documentation
