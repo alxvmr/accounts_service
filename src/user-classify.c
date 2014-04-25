@@ -25,6 +25,7 @@
 #include "user-classify.h"
 
 #include <string.h>
+#include <unistd.h>
 
 static const char *default_excludes[] = {
         "bin",
