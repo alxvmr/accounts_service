@@ -1,0 +1,8 @@
+object 9e0036ad45f23a87e4c75ce7a9c0f1de8023cd76
+type commit
+tag 0.6.37
+tagger Ray Strode <rstrode@redhat.com> 1395341687 -0400
+
+Changes in 0.6.37
+
+* BSD fixes
