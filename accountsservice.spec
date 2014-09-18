@@ -89,8 +89,6 @@ GObject introspection devel data for the accountsservice library
 %doc COPYING README AUTHORS NEWS
 %_sysconfdir/dbus-1/system.d/org.freedesktop.Accounts.conf
 %_libexecdir/accounts-daemon
-%_datadir/dbus-1/interfaces/org.freedesktop.Accounts.xml
-%_datadir/dbus-1/interfaces/org.freedesktop.Accounts.User.xml
 %_datadir/dbus-1/system-services/org.freedesktop.Accounts.service
 %_datadir/polkit-1/actions/org.freedesktop.accounts.policy
 %dir %_localstatedir/lib/AccountsService/
@@ -108,6 +106,7 @@ GObject introspection devel data for the accountsservice library
 %_includedir/*
 %_libdir/*.so
 %_pkgconfigdir/*.pc
+%_datadir/dbus-1/interfaces/*.xml
 
 %files -n lib%name-gir-devel
 %_girdir/*.gir
