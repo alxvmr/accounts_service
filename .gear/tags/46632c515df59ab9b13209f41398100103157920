@@ -1,0 +1,17 @@
+object c87d2fd61a77737cf4cab0c40d1eb98ae2ed849f
+type commit
+tag 0.6.38
+tagger Stef Walter <stefw@redhat.com> 1411052188 +0200
+
+Changes in 0.6.38
+=================
+* Fix polkit policy for non-desktop cases
+* Fix for a race when new user appears
+* Some clearer log and debug messages
+-----BEGIN PGP SIGNATURE-----
+Version: GnuPG v1
+
+iEYEABECAAYFAlQa8qoACgkQe/sRCNknZa/HDQCgrts9gVE9T2FK6ciDnxRPwgXL
+nWAAoM+5ON09y/vju1t8rxPrCf58tU0G
+=Vhuw
+-----END PGP SIGNATURE-----
