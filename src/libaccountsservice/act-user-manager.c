@@ -684,10 +684,13 @@ on_user_changed (ActUser        *user,
                  ActUserManager *manager)
 {
         if (manager->priv->is_loaded) {
-                g_debug ("ActUserManager: %s changed",
+                g_debug ("ActUserManager: sending user-changed signal for %s",
                          describe_user (user));
 
                 g_signal_emit (manager, signals[USER_CHANGED], 0, user);
+
+                g_debug ("ActUserManager: sent user-changed signal for %s",
+                         describe_user (user));
 
                 update_user (manager, user);
         }
@@ -736,6 +739,7 @@ on_get_seat_id_finished (GObject        *object,
         load_seat_incrementally (manager);
 
  out:
+        g_debug ("ActUserManager: unrefing manager owned by GetSeatId request");
         g_object_unref (manager);
 }
 
@@ -923,6 +927,9 @@ remove_user (ActUserManager *manager,
                 g_debug ("ActUserManager: not yet loaded, so not emitting user-removed signal");
         }
 
+        g_debug ("ActUserManager: user '%s' (with object path %s) now removed",
+                 act_user_get_user_name (user),
+                 act_user_get_object_path (user));
         g_object_unref (user);
 }
 
@@ -932,9 +939,13 @@ update_user (ActUserManager *manager,
 {
         const char *username;
 
+        g_debug ("ActUserManager: updating %s", describe_user (user));
+
         username = act_user_get_user_name (user);
         if (g_hash_table_lookup (manager->priv->system_users_by_name, username) != NULL) {
                 if (!act_user_is_system_account (user)) {
+                        g_debug ("ActUserManager: %s is no longer a system account, treating as normal user",
+                                 describe_user (user));
                         g_hash_table_insert (manager->priv->normal_users_by_name,
                                              g_strdup (act_user_get_user_name (user)),
                                              g_object_ref (user));
@@ -947,6 +958,8 @@ update_user (ActUserManager *manager,
                 }
         } else {
                 if (act_user_is_system_account (user)) {
+                        g_debug ("ActUserManager: %s is no longer a normal account, treating as system user",
+                                 describe_user (user));
                         g_hash_table_insert (manager->priv->system_users_by_name,
                                              g_strdup (act_user_get_user_name (user)),
                                              g_object_ref (user));
@@ -1048,6 +1061,25 @@ out:
 }
 
 static ActUser *
+find_new_user_with_object_path (ActUserManager *manager,
+                                const char     *object_path)
+{
+        GSList *node;
+
+        g_assert (object_path != NULL);
+
+        for (node = manager->priv->new_users; node != NULL; node = node->next) {
+                ActUser *user = ACT_USER (node->data);
+                const char *user_object_path = act_user_get_object_path (user);
+                if (g_strcmp0 (user_object_path, object_path) == 0) {
+                        return user;
+                }
+        }
+
+        return NULL;
+}
+
+static ActUser *
 add_new_user_for_object_path (const char     *object_path,
                               ActUserManager *manager)
 {
@@ -1057,6 +1089,14 @@ add_new_user_for_object_path (const char     *object_path,
 
         if (user != NULL) {
                 g_debug ("ActUserManager: tracking existing %s with object path %s",
+                         describe_user (user), object_path);
+                return user;
+        }
+
+        user = find_new_user_with_object_path (manager, object_path);
+
+        if (user != NULL) {
+                g_debug ("ActUserManager: tracking existing (but very recently added) %s with object path %s",
                          describe_user (user), object_path);
                 return user;
         }
@@ -1138,6 +1178,7 @@ on_get_current_session_finished (GObject        *object,
         queue_load_seat_incrementally (manager);
 
  out:
+        g_debug ("ActUserManager: unrefing manager owned by GetCurrentSession request");
         g_object_unref (manager);
 }
 
@@ -1238,6 +1279,7 @@ unload_new_session (ActUserManagerNewSession *new_session)
                 manager->priv->new_sessions = g_slist_remove (manager->priv->new_sessions,
                                                               new_session);
 
+                g_debug ("ActUserManager: unrefing manager owned by new session that's now unloaded");
                 new_session->manager = NULL;
                 g_object_unref (manager);
         }
@@ -1482,6 +1524,7 @@ on_list_cached_users_finished (GObject      *object,
                 g_object_unref (manager->priv->accounts_proxy);
                 manager->priv->accounts_proxy = NULL;
 
+                g_debug ("ActUserManager: unrefing manager owned by failed ListCachedUsers call");
                 g_object_unref (manager);
                 return;
         }
@@ -1529,6 +1572,7 @@ on_list_cached_users_finished (GObject      *object,
                 }
         }
 
+        g_debug ("ActUserManager: unrefing manager owned by finished ListCachedUsers call");
         g_object_unref (manager);
 }
 
@@ -2066,6 +2110,7 @@ on_console_kit_session_proxy_gotten (GObject *object, GAsyncResult *result, gpoi
         load_seat_incrementally (manager);
 
  out:
+        g_debug ("ActUserManager: unrefing manager owned by ConsoleKit proxy getter");
         g_object_unref (manager);
 }
 
@@ -2157,6 +2202,7 @@ free_fetch_user_request (ActUserManagerFetchUserRequest *request)
 
         g_free (request->object_path);
         g_free (request->description);
+        g_debug ("ActUserManager: unrefing manager owned by fetch user request");
         g_object_unref (manager);
 
         g_slice_free (ActUserManagerFetchUserRequest, request);
@@ -2480,6 +2526,7 @@ on_get_sessions_finished (GObject      *object,
         maybe_set_is_loaded (manager);
 
  out:
+        g_debug ("ActUserManager: unrefing manager owned by GetSessions request");
         g_object_unref (manager);
 }
 
@@ -2696,6 +2743,8 @@ act_user_manager_class_init (ActUserManagerClass *klass)
 
         /**
          * ActUserManager::user-added:
+         * @gobject: the object which received the signal
+         * @user: the #ActUser that was added
          *
          * Emitted when a user is added to the user manager.
          */
@@ -2709,6 +2758,8 @@ act_user_manager_class_init (ActUserManagerClass *klass)
                               G_TYPE_NONE, 1, ACT_TYPE_USER);
         /**
          * ActUserManager::user-removed:
+         * @gobject: the object which received the signal
+         * @user: the #ActUser that was removed
          *
          * Emitted when a user is removed from the user manager.
          */
@@ -2722,6 +2773,8 @@ act_user_manager_class_init (ActUserManagerClass *klass)
                               G_TYPE_NONE, 1, ACT_TYPE_USER);
         /**
          * ActUserManager::user-is-logged-in-changed:
+         * @gobject: the object which received the signal
+         * @user: the #ActUser that changed login status
          *
          * One of the users has logged in or out.
          */
@@ -2735,6 +2788,8 @@ act_user_manager_class_init (ActUserManagerClass *klass)
                               G_TYPE_NONE, 1, ACT_TYPE_USER);
         /**
          * ActUserManager::user-changed:
+         * @gobject: the object which received the signal
+         * @user: the #ActUser that changed
          *
          * One of the users has changed
          */
@@ -2843,6 +2898,8 @@ act_user_manager_finalize (GObject *object)
 {
         ActUserManager *manager;
         GSList         *node;
+
+        g_debug ("ActUserManager: finalizing user manager");
 
         g_return_if_fail (object != NULL);
         g_return_if_fail (ACT_IS_USER_MANAGER (object));
