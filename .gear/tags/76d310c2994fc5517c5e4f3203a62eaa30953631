@@ -1,0 +1,10 @@
+object ad6c640f1190e6f74ae14679008e1e2ef07aa35e
+type commit
+tag 0.6.40
+tagger Ray Strode <rstrode@redhat.com> 1421962043 -0500
+
+Changes in 0.6.40
+
+* Support large UIDs better
+* don't require X11 display to fetch user with X11 session
+* ensure accountsservice doesn't start before NSS works
