@@ -1,5 +1,5 @@
-AC_INIT([AccountsService],[0.6.40])
-AM_INIT_AUTOMAKE(no-dist-gzip dist-xz tar-ustar foreign)
+AC_INIT([AccountsService],[0.6.42])
+AM_INIT_AUTOMAKE([1.11.2 no-dist-gzip dist-xz tar-ustar foreign])
 
 GETTEXT_PACKAGE=accounts-service
 AC_SUBST(GETTEXT_PACKAGE)
@@ -185,9 +185,33 @@ fi
 
 AC_SUBST(WARN_CFLAGS)
 
-AC_CHECK_HEADERS([shadow.h utmpx.h])
+AC_CHECK_HEADERS([paths.h shadow.h utmpx.h])
 
-AC_CHECK_FUNCS([fgetpwent getusershell])
+AC_CHECK_FUNCS([fgetpwent setutxdb])
+
+wtmpx_found="no"
+AC_CHECK_DECLS([WTMPX_FILENAME], [wtmpx_found="WTMPX_FILENAME"],
+               [], [AC_INCLUDES_DEFAULT
+#include <utmpx.h>
+               ])
+if test "$wtmpx_found" = "no" ; then
+  AC_CHECK_DECLS([_PATH_WTMPX], [wtmpx_found="_PATH_WTMPX"],
+                 [], [AC_INCLUDES_DEFAULT
+#ifdef HAVE_PATHS_H
+#include <paths.h>
+#endif
+#ifdef HAVE_UTMPX_H
+#include <utmpx.h>
+#endif
+                 ])
+  if test "$wtmpx_found" = "no" ; then
+    AC_CHECK_FILE([/var/log/utx.log], [wtmpx_found='"/var/log/utx.log"'])
+    if test "$wtmpx_found" = "no" ; then
+      AC_MSG_FAILURE([Do not know which filename to watch for wtmp changes])
+    fi
+  fi
+fi
+AC_DEFINE_UNQUOTED([PATH_WTMP], [$wtmpx_found], [Path to wtmpx file])
 
 dnl ---------------------------------------------------------------------------
 dnl - gtk-doc Documentation
@@ -243,7 +267,7 @@ AC_ARG_ENABLE([systemd],
               [enable_systemd=auto])
 
 if test x$enable_systemd != xno; then
-   PKG_CHECK_MODULES(SYSTEMD, [libsystemd-login >= 186],
+   PKG_CHECK_MODULES(SYSTEMD, [libsystemd >= 186],
 			                     [have_systemd=yes], [have_systemd=no])
 else
    have_systemd=no
