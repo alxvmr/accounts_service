@@ -4,7 +4,7 @@
 
 Name: accountsservice
 Version: 0.6.42
-Release: alt1
+Release: alt0.M80P.1
 Summary: D-Bus interfaces for querying and manipulating user account information
 
 Group: System/Base
@@ -112,6 +112,9 @@ GObject introspection devel data for the accountsservice library
 %_girdir/*.gir
 
 %changelog
+* Thu Oct 27 2016 Sergey V Turchin <zerg@altlinux.org> 0.6.42-alt0.M80P.1
+- build for M80P
+
 * Tue Jun 14 2016 Alexey Shabalin <shaba@altlinux.ru> 0.6.42-alt1
 - 0.6.42
 
