@@ -122,9 +122,6 @@ static gint
 account_type_from_pwent (struct passwd *pwent)
 {
         struct group *grp;
-        gid_t wheel;
-        gid_t *groups;
-        gint ngroups;
         gint i;
 
         if (pwent->pw_uid == 0) {
@@ -137,29 +134,21 @@ account_type_from_pwent (struct passwd *pwent)
                 g_debug (ADMIN_GROUP " group not found");
                 return ACCOUNT_TYPE_STANDARD;
         }
-        wheel = grp->gr_gid;
 
-        ngroups = get_user_groups (pwent->pw_name, pwent->pw_gid, &groups);
-
-        for (i = 0; i < ngroups; i++) {
-                if (groups[i] == wheel) {
-                        g_free (groups);
+        for (i = 0; grp->gr_mem[i] != NULL; i++) {
+                if (g_strcmp0 (grp->gr_mem[i], pwent->pw_name) == 0) {
                         return ACCOUNT_TYPE_ADMINISTRATOR;
                 }
         }
-
-        g_free (groups);
 
         return ACCOUNT_TYPE_STANDARD;
 }
 
 void
 user_update_from_pwent (User          *user,
-                        struct passwd *pwent)
+                        struct passwd *pwent,
+                        struct spwd   *spent)
 {
-#ifdef HAVE_SHADOW_H
-        struct spwd *spent;
-#endif
         gchar *real_name;
         gboolean changed;
         const gchar *passwd;
@@ -258,11 +247,8 @@ user_update_from_pwent (User          *user,
         }
 
         passwd = NULL;
-#ifdef HAVE_SHADOW_H
-        spent = getspnam (pwent->pw_name);
         if (spent)
                 passwd = spent->sp_pwdp;
-#endif
 
         if (passwd && passwd[0] == '!') {
                 locked = TRUE;
@@ -284,13 +270,11 @@ user_update_from_pwent (User          *user,
                 mode = PASSWORD_MODE_NONE;
         }
 
-#ifdef HAVE_SHADOW_H
         if (spent) {
                 if (spent->sp_lstchg == 0) {
                         mode = PASSWORD_MODE_SET_AT_LOGIN;
                 }
         }
-#endif
 
         if (user->password_mode != mode) {
                 user->password_mode = mode;

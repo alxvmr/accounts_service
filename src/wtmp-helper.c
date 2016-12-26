@@ -41,11 +41,6 @@ typedef struct {
         gint64  logout_time;
 } UserPreviousLogin;
 
-typedef struct {
-        GHashTable *login_hash;
-        GHashTable *logout_hash;
-} WTmpGeneratorState;
-
 static void
 user_previous_login_free (UserPreviousLogin *previous_login)
 {
@@ -73,9 +68,8 @@ wtmp_helper_start (void)
                 return TRUE;
 }
 
-struct passwd *
-wtmp_helper_entry_generator (GHashTable *users,
-                             gpointer   *state)
+void
+wtmp_helper_update_login_frequencies (GHashTable *users)
 {
         GHashTable *login_hash, *logout_hash;
         struct utmpx *wtmp_entry;
@@ -83,33 +77,30 @@ wtmp_helper_entry_generator (GHashTable *users,
         gpointer key, value;
         struct passwd *pwent;
         User *user;
-        WTmpGeneratorState *state_data;
         GVariantBuilder *builder, *builder2;
         GList *l;
 
-        if (*state == NULL) {
-                /* First iteration */
-
-                if (!wtmp_helper_start ()) {
-                        return NULL;
-                }
-
-                *state = g_new (WTmpGeneratorState, 1);
-                state_data = *state;
-                state_data->login_hash = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
-                state_data->logout_hash = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+        if (!wtmp_helper_start ()) {
+                return;
         }
 
-        /* Every iteration */
-        state_data = *state;
-        login_hash = state_data->login_hash;
-        logout_hash = state_data->logout_hash;
+        login_hash = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+        logout_hash = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+
         while ((wtmp_entry = getutxent ())) {
                 UserAccounting    *accounting;
                 UserPreviousLogin *previous_login;
+                gboolean shutdown_or_reboot = FALSE;
 
-                if (wtmp_entry->ut_type == BOOT_TIME) {
-                        /* Set boot time for missing logout records */
+                if (g_str_equal (wtmp_entry->ut_line, "~")) {
+                        if (g_str_equal (wtmp_entry->ut_user, "shutdown") ||
+                            g_str_equal (wtmp_entry->ut_user, "reboot")) {
+                                shutdown_or_reboot = TRUE;
+                        }
+                }
+
+                if (wtmp_entry->ut_type == BOOT_TIME || shutdown_or_reboot) {
+                        /* Set shutdown, reboot, or boot time for missing logout records */
                         g_hash_table_iter_init (&iter, logout_hash);
                         while (g_hash_table_iter_next (&iter, &key, &value)) {
                                 previous_login = (UserPreviousLogin *) value;
@@ -165,8 +156,6 @@ wtmp_helper_entry_generator (GHashTable *users,
                 accounting->previous_logins = g_list_prepend (accounting->previous_logins, previous_login);
 
                 g_hash_table_insert (logout_hash, g_strdup (wtmp_entry->ut_line), previous_login);
-
-                return pwent;
         }
 
         /* Last iteration */
@@ -204,9 +193,6 @@ wtmp_helper_entry_generator (GHashTable *users,
 
         g_hash_table_unref (login_hash);
         g_hash_table_unref (logout_hash);
-        g_free (state_data);
-        *state = NULL;
-        return NULL;
 }
 
 const gchar *
@@ -216,13 +202,6 @@ wtmp_helper_get_path_for_monitor (void)
 }
 
 #else /* HAVE_UTMPX_H */
-
-struct passwd *
-wtmp_helper_entry_generator (GHashTable *users,
-                             gpointer   *state)
-{
-        return NULL;
-}
 
 const gchar *
 wtmp_helper_get_path_for_monitor (void)

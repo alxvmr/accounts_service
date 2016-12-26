@@ -1,4 +1,4 @@
-AC_INIT([AccountsService],[0.6.42])
+AC_INIT([AccountsService],[0.6.43])
 AM_INIT_AUTOMAKE([1.11.2 no-dist-gzip dist-xz tar-ustar foreign])
 
 GETTEXT_PACKAGE=accounts-service
@@ -212,6 +212,11 @@ if test "$wtmpx_found" = "no" ; then
   fi
 fi
 AC_DEFINE_UNQUOTED([PATH_WTMP], [$wtmpx_found], [Path to wtmpx file])
+
+AC_CHECK_LIB(c, getusershell, have_getusershell=yes, have_getusershell=no)
+if test x$have_getusershell = xyes; then
+  AC_DEFINE(HAVE_GETUSERSHELL, 1, [Define if getusershell() is available])
+fi
 
 dnl ---------------------------------------------------------------------------
 dnl - gtk-doc Documentation
