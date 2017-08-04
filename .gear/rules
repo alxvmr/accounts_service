@@ -1,4 +1,5 @@
 tar: @version@:.
-diff: @version@:. patches/altlinux:.
+diff: @version@:. patches/altlinux:. name=@name@-@version@.patch
+
 
 

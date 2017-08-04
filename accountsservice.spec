@@ -13,7 +13,7 @@ Url: http://www.fedoraproject.org/wiki/Features/UserAccountDialog
 #VCS: git://anongit.freedesktop.org/accountsservice
 
 Source: %name-%version.tar
-Patch1: %name-%version-%release.patch
+Patch1: %name-%version.patch
 
 BuildRequires(pre): rpm-build-ubt
 BuildRequires: intltool gtk-doc
