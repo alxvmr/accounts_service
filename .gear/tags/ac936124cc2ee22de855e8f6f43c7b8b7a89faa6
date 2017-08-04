@@ -1,0 +1,8 @@
+object db223bc474b5ae914f2c6ff4d07c69d747cfeda7
+type commit
+tag 0.6.45
+tagger Ray Strode <rstrode@redhat.com> 1490639753 -0400
+
+Changes in 0.6.45
+
+* wrap password expiration info in libaccountsservice api
