@@ -1,0 +1,8 @@
+object d858553498c3275b473887b928ba8fcb9c42eaf9
+type commit
+tag 0.6.49
+tagger Ray Strode <rstrode@redhat.com> 1525982966 -0400
+
+0.6.49
+
+* Fix crash on startup from previous compiler warning fix
