@@ -1,4 +1,4 @@
-AC_INIT([AccountsService],[0.6.45])
+AC_INIT([AccountsService],[0.6.49])
 AM_INIT_AUTOMAKE([1.11.2 no-dist-gzip dist-xz tar-ustar foreign])
 
 GETTEXT_PACKAGE=accounts-service
@@ -25,16 +25,10 @@ AC_SUBST(LT_CURRENT)
 AC_SUBST(LT_REVISION)
 AC_SUBST(LT_AGE)
 
-PKG_CHECK_MODULES(GIO, gio-2.0 >= 2.37.3 gio-unix-2.0)
-PKG_CHECK_MODULES(POLKIT, gio-unix-2.0 polkit-gobject-1)
+PKG_CHECK_MODULES(LIBACCOUNTSSERVICE, glib-2.0 >= 2.44 gio-2.0 >= 2.37.3 gio-unix-2.0)
+PKG_CHECK_MODULES(ACCOUNTS_DAEMON, glib-2.0 >= 2.44 gio-unix-2.0 polkit-gobject-1)
 
 AM_MAINTAINER_MODE([enable])
-
-# client library dependencies
-LIBACCOUNTSSERVICE_LIBS="$GIO_LIBS"
-AC_SUBST(LIBACCOUNTSSERVICE_LIBS)
-LIBACCOUNTSSERVICE_CFLAGS="$GIO_CFLAGS"
-AC_SUBST(LIBACCOUNTSSERVICE_CFLAGS)
 
 GOBJECT_INTROSPECTION_CHECK([0.9.12])
 
@@ -53,6 +47,11 @@ AS_IF([test x$enable_admin_group = xauto], [
   ])
 ])
 AC_DEFINE_UNQUOTED([ADMIN_GROUP], ["$enable_admin_group"], [Define to the group for administrator users])
+
+AC_ARG_WITH(extra-admin-groups,
+        [AS_HELP_STRING([--with-extra-admin-groups],[Comma-separated list of extra groups that administrator users are part of])],
+        ,with_extra_admin_groups="")
+AC_DEFINE_UNQUOTED([EXTRA_ADMIN_GROUPS], ["$with_extra_admin_groups"], [Define to the list of extra groups administrator users are part of])
 
 AC_ARG_ENABLE(user-heuristics,
         [AS_HELP_STRING([--enable-user-heuristics],[Enable heuristics for guessing system vs. human users in the range 500-minimum-uid])],
@@ -264,21 +263,23 @@ dnl Check for xsltproc
 dnl ---------------------------------------------------------------------------
 AC_PATH_PROG([XSLTPROC], [xsltproc])
 
-# systemd
+# systemd or elogind
+
+have_systemd=no
+
+AC_MSG_CHECKING([whether to use systemd])
 
 AC_ARG_ENABLE([systemd],
               AS_HELP_STRING([--enable-systemd], [Use systemd]),
               [enable_systemd=$enableval],
               [enable_systemd=auto])
 
-if test x$enable_systemd != xno; then
-   PKG_CHECK_MODULES(SYSTEMD, [libsystemd >= 186],
-			                     [have_systemd=yes], [have_systemd=no])
-else
-   have_systemd=no
-fi
+AC_MSG_RESULT($enable_systemd)
 
-AC_MSG_CHECKING([whether to use systemd])
+if test x$enable_systemd != xno; then
+        PKG_CHECK_MODULES(SYSTEMD, [libsystemd >= 186],
+                                   [have_systemd=yes])
+fi
 
 if test x$enable_systemd = xauto ; then
         if test x$have_systemd = xno ; then
@@ -288,21 +289,54 @@ if test x$enable_systemd = xauto ; then
         fi
 fi
 
-AC_MSG_RESULT($enable_systemd)
+have_elogind=no
+
+AC_MSG_CHECKING([whether to use elogind])
+
+AC_ARG_ENABLE([elogind],
+              AS_HELP_STRING([--enable-elogind], [Use elogind]),
+              [enable_elogind=$enableval],
+              [enable_elogind=no])
+
+AC_MSG_RESULT($enable_elogind)
 
 if test x$enable_systemd = xyes; then
         if test x$have_systemd = xno; then
-                AC_MSG_ERROR([Systemd support explicitly required, but systemd not found])
+                AC_MSG_ERROR([Systemd support explicitly requested, but libsystemd not found])
         fi
+
+        dnl Requesting to use the elogind session tracker makes no sense where
+        dnl systemd-login is (or might be) running.
+        if test x$enable_elogind = xyes; then
+                AC_MSG_WARN([elogind support requested, but systemd was found.])
+                AC_MSG_ERROR([Disable either elogind or systemd support.])
+        fi
+
+        AC_SUBST(SYSTEMD_CFLAGS)
+        AC_SUBST(SYSTEMD_LIBS)
+
+        LIBACCOUNTSSERVICE_LIBS="$LIBACCOUNTSSERVICE_LIBS $SYSTEMD_LIBS"
+        LIBACCOUNTSSERVICE_CFLAGS="$LIBACCOUNTSSERVICE_CFLAGS $SYSTEMD_CFLAGS"
+
         AC_DEFINE(HAVE_SYSTEMD, 1, [Define if systemd is used])
 fi
-AC_SUBST(SYSTEMD_CFLAGS)
-AC_SUBST(SYSTEMD_LIBS)
 
-LIBACCOUNTSSERVICE_LIBS="$LIBACCOUNTSSERVICE_LIBS $SYSTEMD_LIBS"
-LIBACCOUNTSSERVICE_CFLAGS="$LIBACCOUNTSSERVICE_CFLAGS $SYSTEMD_CFLAGS"
+if test "x$enable_elogind" != "xno"; then
+        PKG_CHECK_MODULES(ELOGIND, [libelogind >= 229.4],
+                                   [have_elogind=yes])
 
-if test "x$have_systemd" != "xno" ; then
+        if test "x$have_elogind" != "xyes"; then
+                AC_MSG_ERROR([elogind support requested, but libelogind not found])
+        else
+                AC_SUBST(ELOGIND_CFLAGS)
+                AC_SUBST(ELOGIND_LIBS)
+
+                LIBACCOUNTSSERVICE_LIBS="$LIBACCOUNTSSERVICE_LIBS $ELOGIND_LIBS"
+                LIBACCOUNTSSERVICE_CFLAGS="$LIBACCOUNTSSERVICE_CFLAGS $ELOGIND_CFLAGS"
+        fi
+fi
+
+if test "x${have_systemd}" != "xno" -o "x${have_elogind}" != "xno" ; then
         AC_DEFINE(WITH_SYSTEMD, 1, [Define to enable systemd support])
 fi
 
@@ -317,6 +351,11 @@ if test "x$with_systemdsystemunitdir" != "xno"; then
     AC_SUBST([systemdsystemunitdir], [$with_systemdsystemunitdir])
 fi
 AM_CONDITIONAL(HAVE_SYSTEMD, [test -n "$with_systemdsystemunitdir" -a "x$with_systemdsystemunitdir" != "xno" ])
+
+AC_ARG_WITH(gdmconffile,
+            AS_HELP_STRING([--with-gdmconffile=FILE], [GDM configuration file, default=/etc/gdm/custom.conf]),
+            gdmconffile=${withval}, gdmconffile=/etc/gdm/custom.conf)
+AC_DEFINE_UNQUOTED([PATH_GDM_CUSTOM], ["$gdmconffile"], [GDM configuration file])
 
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_FILES([
@@ -341,6 +380,8 @@ else
         AC_MSG_NOTICE([** DocBook documentation build disabled])
 fi
         AC_MSG_NOTICE([** Administrator group: $enable_admin_group])
+        AC_MSG_NOTICE([** Extra administrator groups: $with_extra_admin_groups])
+        AC_MSG_NOTICE([** GDM configuration: $gdmconffile])
 echo
 
 
