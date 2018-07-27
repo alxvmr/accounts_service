@@ -1,0 +1,10 @@
+object f49ca6475643a0dad62ad98af9673b43858d1610
+type commit
+tag 0.6.50
+tagger Ray Strode <rstrode@redhat.com> 1531236274 -0400
+
+0.6.50
+
+* Fix insufficient path check on user icon files
+* Fix is-logged-in status for wayland sessions
+* Fix user enumeration when system accounts are mixed in
