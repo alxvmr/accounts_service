@@ -237,6 +237,10 @@ entry_generator_fgetpwent (Daemon       *daemon,
                             *spent = &shadow_entry_buffers->spbuf;
                             return pwent;
                         }
+			else {
+			    *spent = NULL;
+			    return pwent;
+			}
                 }
         }
 
