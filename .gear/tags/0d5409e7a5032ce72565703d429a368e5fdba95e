@@ -1,0 +1,8 @@
+object 708d87f30e549588f7efa03efeffab1c9b83cdcb
+type commit
+tag 0.6.54
+tagger Ray Strode <rstrode@redhat.com> 1538225664 -0400
+
+0.6.54
+
+* Fix user state dirs
