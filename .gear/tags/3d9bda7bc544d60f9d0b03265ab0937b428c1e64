@@ -1,0 +1,13 @@
+object 1ef3add46983af875adfed5d29954cbfb184f688
+type commit
+tag 22.08.8
+tagger Ray Strode <rstrode@redhat.com> 1646075528 -0500
+
+22.08.8
+
+Sebastien Bacher (2):
+      Handle missing admin groups when changing account types
+      Set PrivateTmp to false in the systemd service
+
+zhuyaliang (1):
+      Add function to set user password expiration policy
