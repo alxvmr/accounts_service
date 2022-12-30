@@ -4,6 +4,8 @@
  * Copyright (C) 2007-2008 William Jon McCann <mccann@jhu.edu>
  * Copyright (C) 2009-2010 Red Hat, Inc.
  * Copyright © 2013 Canonical Limited
+ * Copyright (c) 2023 Serenity Cybersecurity, LLC <license@futurecrew.ru>
+ *               Author: Gleb Popov <arrowd@FreeBSD.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -494,6 +496,10 @@ user_update_from_pwent (User          *user,
                 user->days_to_warn = spent->sp_warn;
                 user->days_after_expiration_until_lock = spent->sp_inact;
                 user->account_expiration_policy_known = TRUE;
+        } else {
+#ifdef HAVE_STRUCT_PASSWD_PW_EXPIRE
+                user->user_expiration_time = g_date_time_new_from_unix_utc (pwent->pw_expire);
+#endif
         }
 
         accounts_user_set_password_mode (ACCOUNTS_USER (user), mode);

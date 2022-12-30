@@ -19,6 +19,8 @@
 
 #pragma once
 
+#include "config.h"
+
 #include <sys/types.h>
 #include <pwd.h>
 #ifdef HAVE_SHADOW_H

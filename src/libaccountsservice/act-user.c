@@ -26,7 +26,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#ifdef HAVE_CRYPT_H
 #include <crypt.h>
+#endif
 
 #include <glib.h>
 #include <glib/gi18n.h>
