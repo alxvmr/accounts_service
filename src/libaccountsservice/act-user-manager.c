@@ -1754,6 +1754,7 @@ load_new_session_incrementally (ActUserManagerNewSession *new_session)
                 break;
         case ACT_USER_MANAGER_NEW_SESSION_STATE_LOADED:
                 break;
+        case ACT_USER_MANAGER_NEW_SESSION_STATE_UNLOADED:
         default:
                 g_assert_not_reached ();
         }
@@ -2270,6 +2271,7 @@ load_seat_incrementally (ActUserManager *manager)
         case ACT_USER_MANAGER_SEAT_STATE_LOADED:
                 g_debug ("ActUserManager: Seat loading sequence complete");
                 break;
+        case ACT_USER_MANAGER_NEW_SESSION_STATE_UNLOADED:
         default:
                 g_assert_not_reached ();
         }
