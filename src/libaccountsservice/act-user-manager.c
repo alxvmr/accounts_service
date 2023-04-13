@@ -153,6 +153,7 @@ typedef struct
         };
         char                              *object_path;
         char                              *description;
+        gulong                             ready_id;
 } ActUserManagerFetchUserRequest;
 
 typedef struct
@@ -1782,6 +1783,7 @@ free_fetch_user_request (ActUserManagerFetchUserRequest *request)
         g_cancellable_cancel (request->cancellable);
         g_object_unref (request->cancellable);
 
+        g_clear_signal_handler (&request->ready_id, manager);
 
         g_debug ("ActUserManager: unrefing manager owned by fetch user request");
         g_object_unref (manager);
@@ -1824,7 +1826,7 @@ on_user_manager_maybe_ready_for_request (ActUserManager                 *manager
         g_debug ("ActUserManager: user manager now loaded, proceeding with fetch user request for %s",
                  request->description);
 
-        g_signal_handlers_disconnect_by_func (manager, on_user_manager_maybe_ready_for_request, request);
+        g_clear_signal_handler (&request->ready_id, manager);
 
         request->state++;
         fetch_user_incrementally (request);
@@ -1846,8 +1848,10 @@ fetch_user_incrementally (ActUserManagerFetchUserRequest *request)
                 } else {
                         g_debug ("ActUserManager: waiting for user manager to load before finding %s",
                                  request->description);
-                        g_signal_connect (manager, "notify::is-loaded",
-                                          G_CALLBACK (on_user_manager_maybe_ready_for_request), request);
+                        g_assert (request->ready_id == 0);
+                        request->ready_id =
+                                g_signal_connect (manager, "notify::is-loaded",
+                                                  G_CALLBACK (on_user_manager_maybe_ready_for_request), request);
                 }
                 break;
 
