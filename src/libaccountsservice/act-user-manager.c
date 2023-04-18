@@ -718,6 +718,8 @@ on_user_destroyed (ActUserManager *manager,
         ActUserManagerPrivate *priv = act_user_manager_get_instance_private (manager);
         GSList *node;
 
+        priv->new_users = g_slist_remove (priv->new_users, destroyed_user);
+
         node = priv->fetch_user_requests;
         while (node != NULL) {
                 ActUserManagerFetchUserRequest *request;
