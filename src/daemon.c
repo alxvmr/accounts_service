@@ -1803,9 +1803,8 @@ load_autologin (Daemon   *daemon,
         else if (dm_type == DISPLAY_MANAGER_TYPE_GDM)
                 return load_autologin_gdm (daemon, name, enabled, error);
 
-        g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, _ ("Unsupported Display Manager"));
-
-        return FALSE;
+        /* Default to GDM for backward compatibility */
+        return load_autologin_gdm (daemon, name, enabled, error);
 }
 
 static gboolean
@@ -1885,7 +1884,8 @@ save_autologin (Daemon      *daemon,
         else if (dm_type == DISPLAY_MANAGER_TYPE_GDM)
                 return save_autologin_gdm (daemon, name, enabled, error);
 
-        return FALSE;
+        /* Default to GDM for backward compatibility */
+        return save_autologin_gdm (daemon, name, enabled, error);
 }
 
 gboolean
