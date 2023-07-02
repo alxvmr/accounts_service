@@ -4,6 +4,7 @@ option('lightdmconffile', type: 'string', value: '/etc/lightdm/lightdm.conf', de
 
 option('admin_group', type: 'string', value: '', description: 'Set group for administrative accounts')
 option('extra_admin_groups', type: 'array', value: [], description: 'Comma-separated list of extra groups that administrator users are part of')
+option('default_user_groups', type: 'array', value: [], description: 'Comma-separated list of groups that all users are part of by default')
 option('minimum_uid', type: 'integer', value: 1000, description: 'Set minimum uid for human users')
 
 option('elogind', type: 'boolean', value: false, description: 'Use elogind')

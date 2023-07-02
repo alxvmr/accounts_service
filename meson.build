@@ -198,6 +198,10 @@ if admin_group == ''
   endif
 endif
 
+default_user_groups = ','.join(get_option('default_user_groups'))
+
+config_h.set_quoted('DEFAULT_USER_GROUPS', default_user_groups)
+
 extra_admin_groups = ','.join(get_option('extra_admin_groups'))
 
 config_h.set_quoted('ADMIN_GROUP', admin_group)
@@ -247,6 +251,7 @@ meson.add_install_script(
 output = '\n' + meson.project_name() + ' was configured with the following options:\n'
 output += '** DocBook documentation build: ' + enable_docbook.to_string() + '\n'
 output += '** Administrator group: ' + admin_group + '\n'
+output += '** Default user groups: ' + default_user_groups + '\n'
 output += '** Extra administrator groups: ' + extra_admin_groups + '\n'
 output += '** GDM configuration: ' + gdm_conf_file + '\n'
 output += '** LightDM configuration: ' + lightdm_conf_file
