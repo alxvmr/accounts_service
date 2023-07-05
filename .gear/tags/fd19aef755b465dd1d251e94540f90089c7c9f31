@@ -1,0 +1,15 @@
+object 57e491f5e6f3da2d5a949f4f8747c8f4e8ed799d
+type commit
+tag 23.13.9
+tagger Ray Strode <halfline@gmail.com> 1680015887 +0000
+
+Ray Strode (9):
+      subprojects: Add mocklibc to package cache
+      daemon: Fix boot delay
+      tests: Fix dbusmock accountservice template user parameterization
+      tests: Add test for multiple in-flight get_user calls
+      user-manager: Don't prematurely free duplicate ActUser objects
+      user-manager: Add cancellable to fetch user requests
+      user-manager: Cope with buggy callers better
+      user-manager: Deduplicate ActUser objects when possible
+      user-manager: Track non-existent users
