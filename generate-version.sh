@@ -4,11 +4,10 @@ exec 3>&2 2> /dev/null
 SRCDIR=$(dirname "$0")
 cd "$SRCDIR"
 CWD=$(realpath "$PWD")
-TOPLEVEL_WORKING_DIR=$(realpath "$(git rev-parse --show-toplevel)")
 exec 2>&3
 
 # If it's not from a git checkout, assume it's from a tarball
-if [ "$TOPLEVEL_WORKING_DIR" != "$CWD" ]; then
+if ! git rev-parse --is-inside-git-dir > /dev/null 2>&1; then
     VERSION_FROM_DIR_NAME=$(basename "$CWD" | sed -n 's/^accountsservice-\([^-]*\)$/\1/p')
 
     if [ -n "$VERSION_FROM_DIR_NAME" ]; then

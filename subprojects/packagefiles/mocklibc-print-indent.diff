@@ -1,0 +1,13 @@
+diff -up mocklibc-1.0/src/netgroup-debug.c.print-indent mocklibc-1.0/src/netgroup-debug.c
+--- mocklibc-1.0/src/netgroup-debug.c.print-indent	2023-04-11 10:20:53.717381559 -0400
++++ mocklibc-1.0/src/netgroup-debug.c	2023-04-11 10:21:02.296270333 -0400
+@@ -21,6 +21,9 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ 
++void print_indent (FILE        *stream,
++                   unsigned int indent);
++
+ void netgroup_debug_print_entry(struct entry *entry, FILE *stream, unsigned int indent) {
+   print_indent(stream, indent);
+ 

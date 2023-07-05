@@ -153,6 +153,7 @@ typedef struct
         };
         char                              *object_path;
         char                              *description;
+        gulong                             ready_id;
 } ActUserManagerFetchUserRequest;
 
 typedef struct
@@ -716,6 +717,8 @@ on_user_destroyed (ActUserManager *manager,
 {
         ActUserManagerPrivate *priv = act_user_manager_get_instance_private (manager);
         GSList *node;
+
+        priv->new_users = g_slist_remove (priv->new_users, destroyed_user);
 
         node = priv->fetch_user_requests;
         while (node != NULL) {
@@ -1754,6 +1757,7 @@ load_new_session_incrementally (ActUserManagerNewSession *new_session)
                 break;
         case ACT_USER_MANAGER_NEW_SESSION_STATE_LOADED:
                 break;
+        case ACT_USER_MANAGER_NEW_SESSION_STATE_UNLOADED:
         default:
                 g_assert_not_reached ();
         }
@@ -1781,6 +1785,7 @@ free_fetch_user_request (ActUserManagerFetchUserRequest *request)
         g_cancellable_cancel (request->cancellable);
         g_object_unref (request->cancellable);
 
+        g_clear_signal_handler (&request->ready_id, manager);
 
         g_debug ("ActUserManager: unrefing manager owned by fetch user request");
         g_object_unref (manager);
@@ -1823,7 +1828,7 @@ on_user_manager_maybe_ready_for_request (ActUserManager                 *manager
         g_debug ("ActUserManager: user manager now loaded, proceeding with fetch user request for %s",
                  request->description);
 
-        g_signal_handlers_disconnect_by_func (manager, on_user_manager_maybe_ready_for_request, request);
+        g_clear_signal_handler (&request->ready_id, manager);
 
         request->state++;
         fetch_user_incrementally (request);
@@ -1845,8 +1850,10 @@ fetch_user_incrementally (ActUserManagerFetchUserRequest *request)
                 } else {
                         g_debug ("ActUserManager: waiting for user manager to load before finding %s",
                                  request->description);
-                        g_signal_connect (manager, "notify::is-loaded",
-                                          G_CALLBACK (on_user_manager_maybe_ready_for_request), request);
+                        g_assert (request->ready_id == 0);
+                        request->ready_id =
+                                g_signal_connect (manager, "notify::is-loaded",
+                                                  G_CALLBACK (on_user_manager_maybe_ready_for_request), request);
                 }
                 break;
 
@@ -2270,6 +2277,7 @@ load_seat_incrementally (ActUserManager *manager)
         case ACT_USER_MANAGER_SEAT_STATE_LOADED:
                 g_debug ("ActUserManager: Seat loading sequence complete");
                 break;
+        case ACT_USER_MANAGER_NEW_SESSION_STATE_UNLOADED:
         default:
                 g_assert_not_reached ();
         }

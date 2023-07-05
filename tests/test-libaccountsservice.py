@@ -39,7 +39,7 @@ class AccountsServiceTestBase(dbusmock.DBusTestCase):
         super().setUp()
         if not hasattr(self, '_mock'):
             template = os.path.join(
-                os.path.dirname(__file__), 'dbusmock/accounts_service.py')
+                os.path.dirname(__file__), 'mock_services/accounts_service.py')
             (self._mock, self._mock_obj) = self.spawn_server_template(
                 template, {}, stdout=subprocess.PIPE)
         self._manager = AccountsService.UserManager.get_default()
@@ -88,7 +88,7 @@ class TestAccountsServicePreExistingUser(AccountsServiceTestBase):
     '''Test mocking AccountsService with pre-existing user'''
     def setUp(self):
         template = os.path.join(
-            os.path.dirname(__file__), 'dbusmock/accounts_service.py')
+            os.path.dirname(__file__), 'mock_services/accounts_service.py')
         (self._mock, self._mock_obj) = self.spawn_server_template(
             template, {'users': { 2001: 'pizza' }}, stdout=subprocess.PIPE)
         super().setUp()

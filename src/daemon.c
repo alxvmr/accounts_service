@@ -1803,9 +1803,8 @@ load_autologin (Daemon   *daemon,
         else if (dm_type == DISPLAY_MANAGER_TYPE_GDM)
                 return load_autologin_gdm (daemon, name, enabled, error);
 
-        g_set_error (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, _ ("Unsupported Display Manager"));
-
-        return FALSE;
+        /* Default to GDM for backward compatibility */
+        return load_autologin_gdm (daemon, name, enabled, error);
 }
 
 static gboolean
@@ -1824,7 +1823,7 @@ save_autologin_gdm (Daemon      *daemon,
                                         PATH_GDM_CUSTOM,
                                         G_KEY_FILE_KEEP_COMMENTS,
                                         &local_error)) {
-                /* It's OK for custom.conf to not exist, we will make it */
+                /* It's OK if the GDM config file doesn't exist, since we will make it, if necessary */
                 if (!g_error_matches (local_error, G_FILE_ERROR, G_FILE_ERROR_NOENT)) {
                         g_propagate_error (error, g_steal_pointer (&local_error));
                         return FALSE;
@@ -1885,7 +1884,8 @@ save_autologin (Daemon      *daemon,
         else if (dm_type == DISPLAY_MANAGER_TYPE_GDM)
                 return save_autologin_gdm (daemon, name, enabled, error);
 
-        return FALSE;
+        /* Default to GDM for backward compatibility */
+        return save_autologin_gdm (daemon, name, enabled, error);
 }
 
 gboolean
