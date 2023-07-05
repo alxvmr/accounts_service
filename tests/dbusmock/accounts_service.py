@@ -40,8 +40,7 @@ def load(mock, parameters=None):
     mock.AddProperties(MAIN_IFACE, mock.GetAll(MAIN_IFACE))
 
     for uid, name in parameters.get('users', {}).items():
-        mock.AddUser(uid, name)
-
+        mock.AddUser(uid, name, DEFAULT_USER_PASSWORD, {}, {})
 
 def emit_properties_changed(mock, interface=MAIN_IFACE, properties=None):
     if properties is None:

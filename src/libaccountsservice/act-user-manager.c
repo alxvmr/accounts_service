@@ -145,6 +145,7 @@ typedef struct
         ActUserManagerGetUserState         state;
         ActUser                           *user;
         ActUserManagerFetchUserRequestType type;
+        GCancellable                      *cancellable;
         union
         {
                 char *username;
@@ -168,6 +169,8 @@ typedef struct
         GSList            *new_sessions;
         GSList            *new_users;                 /* (element-type ActUser) (owned) */
         GSList            *new_users_inhibiting_load; /* (element-type ActUser) (unowned) */
+        GSList            *dopplegangers;
+        GSList            *nonexistent_users;
         GSList            *fetch_user_requests;
 
         GSList            *exclude_usernames;
@@ -228,6 +231,7 @@ static void     fetch_user_incrementally (ActUserManagerFetchUserRequest *reques
 static void     maybe_set_is_loaded (ActUserManager *manager);
 static void     update_user (ActUserManager *manager,
                              ActUser        *user);
+static void     free_fetch_user_request (ActUserManagerFetchUserRequest *request);
 static gpointer user_manager_object = NULL;
 
 G_DEFINE_TYPE_WITH_PRIVATE (ActUserManager, act_user_manager, G_TYPE_OBJECT)
@@ -706,6 +710,33 @@ set_has_multiple_users (ActUserManager *manager,
         }
 }
 
+static void
+on_user_destroyed (ActUserManager *manager,
+                   GObject        *destroyed_user)
+{
+        ActUserManagerPrivate *priv = act_user_manager_get_instance_private (manager);
+        GSList *node;
+
+        node = priv->fetch_user_requests;
+        while (node != NULL) {
+                ActUserManagerFetchUserRequest *request;
+                GSList *next_node;
+
+                request = node->data;
+                next_node = node->next;
+
+                if ((gpointer) request->user == destroyed_user) {
+                        g_debug ("ActUserManager: User %s destroyed while still being fetched",
+                                 request->description);
+
+                        request->user = NULL;
+                        free_fetch_user_request (request);
+                }
+
+                node = next_node;
+        }
+}
+
 /* (transfer full) */
 static ActUser *
 create_new_user (ActUserManager *manager)
@@ -960,6 +991,15 @@ on_new_user_loaded (ActUser        *user,
                 add_user (manager, user);
         } else {
                 _act_user_load_from_user (old_user, user);
+
+                /* The same user had two pending loads (one by uid and one by username), and
+                 * so there are now two objects representing the same user. We can't free
+                 * either one because they both may be in use by callers, and they're both
+                 * ostensbly owned by the user manager. Keep the first one to win
+                 * as the "main" one and treat the leftover one as a doppleganger that we just
+                 * track to clean up at dispose time.
+                 */
+                priv->dopplegangers = g_slist_prepend (priv->dopplegangers, g_object_ref (user));
         }
 
         g_object_unref (user);
@@ -1179,6 +1219,10 @@ on_find_user_by_name_finished (GObject      *object,
         char *user;
 
         if (!accounts_accounts_call_find_user_by_name_finish (proxy, &user, result, &error)) {
+                if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+                        return;
+                }
+
                 if (error != NULL) {
                         g_debug ("ActUserManager: Failed to find %s: %s",
                                  request->description, error->message);
@@ -1210,6 +1254,10 @@ on_find_user_by_id_finished (GObject      *object,
         char *user;
 
         if (!accounts_accounts_call_find_user_by_id_finish (proxy, &user, result, &error)) {
+                if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+                        return;
+                }
+
                 if (error != NULL) {
                         g_debug ("ActUserManager: Failed to find user %lu: %s",
                                  (gulong) request->uid, error->message);
@@ -1246,7 +1294,7 @@ find_user_in_accounts_service (ActUserManager                 *manager,
                                                           request->username,
                                                           G_DBUS_CALL_FLAGS_ALLOW_INTERACTIVE_AUTHORIZATION,
                                                           -1,
-                                                          NULL,
+                                                          request->cancellable,
                                                           on_find_user_by_name_finished,
                                                           request);
                 break;
@@ -1255,7 +1303,7 @@ find_user_in_accounts_service (ActUserManager                 *manager,
                                                         request->uid,
                                                         G_DBUS_CALL_FLAGS_ALLOW_INTERACTIVE_AUTHORIZATION,
                                                         -1,
-                                                        NULL,
+                                                        request->cancellable,
                                                         on_find_user_by_id_finished,
                                                         request);
                 break;
@@ -1717,7 +1765,10 @@ free_fetch_user_request (ActUserManagerFetchUserRequest *request)
         ActUserManager *manager = request->manager;
         ActUserManagerPrivate *priv = act_user_manager_get_instance_private (manager);
 
-        g_object_set_data (G_OBJECT (request->user), "fetch-user-request", NULL);
+        if (request->user != NULL) {
+                g_object_set_data (G_OBJECT (request->user), "fetch-user-request", NULL);
+                g_object_weak_unref (G_OBJECT (request->user), (GWeakNotify) on_user_destroyed, manager);
+        }
 
         priv->fetch_user_requests = g_slist_remove (priv->fetch_user_requests, request);
         if (request->type == ACT_USER_MANAGER_FETCH_USER_FROM_USERNAME_REQUEST) {
@@ -1726,6 +1777,11 @@ free_fetch_user_request (ActUserManagerFetchUserRequest *request)
 
         g_free (request->object_path);
         g_free (request->description);
+
+        g_cancellable_cancel (request->cancellable);
+        g_object_unref (request->cancellable);
+
+
         g_debug ("ActUserManager: unrefing manager owned by fetch user request");
         g_object_unref (manager);
 
@@ -1736,6 +1792,8 @@ static void
 give_up (ActUserManager                 *manager,
          ActUserManagerFetchUserRequest *request)
 {
+        ActUserManagerPrivate *priv = act_user_manager_get_instance_private (manager);
+
         if (request->type == ACT_USER_MANAGER_FETCH_USER_FROM_USERNAME_REQUEST)
                 g_debug ("ActUserManager: failed to load user %s", request->username);
         else
@@ -1743,8 +1801,12 @@ give_up (ActUserManager                 *manager,
 
         request->state = ACT_USER_MANAGER_GET_USER_STATE_UNFETCHED;
 
-        if (request->user)
+        if (request->user != NULL) {
+                priv->nonexistent_users = g_slist_prepend (priv->nonexistent_users, g_object_ref (request->user));
                 _act_user_update_as_nonexistent (request->user);
+        }
+
+        g_cancellable_cancel (request->cancellable);
 }
 
 static void
@@ -1830,10 +1892,12 @@ fetch_user_with_username_from_accounts_service (ActUserManager *manager,
         request->user = user;
         request->state = ACT_USER_MANAGER_GET_USER_STATE_UNFETCHED + 1;
         request->description = g_strdup_printf ("user '%s'", request->username);
+        request->cancellable = g_cancellable_new ();
 
         priv->fetch_user_requests = g_slist_prepend (priv->fetch_user_requests,
                                                      request);
         g_object_set_data (G_OBJECT (user), "fetch-user-request", request);
+        g_object_weak_ref (G_OBJECT (user), (GWeakNotify) on_user_destroyed, manager);
         fetch_user_incrementally (request);
 }
 
@@ -1853,11 +1917,39 @@ fetch_user_with_id_from_accounts_service (ActUserManager *manager,
         request->user = user;
         request->state = ACT_USER_MANAGER_GET_USER_STATE_UNFETCHED + 1;
         request->description = g_strdup_printf ("user with id %lu", (gulong) request->uid);
+        request->cancellable = g_cancellable_new ();
 
         priv->fetch_user_requests = g_slist_prepend (priv->fetch_user_requests,
                                                      request);
         g_object_set_data (G_OBJECT (user), "fetch-user-request", request);
+        g_object_weak_ref (G_OBJECT (user), (GWeakNotify) on_user_destroyed, manager);
         fetch_user_incrementally (request);
+}
+
+static ActUser *
+check_fetch_user_requests_for_user (ActUserManager *manager,
+                                    const char     *username)
+{
+        ActUserManagerPrivate *priv = act_user_manager_get_instance_private (manager);
+        GSList *node;
+
+        node = priv->fetch_user_requests;
+        while (node != NULL) {
+                ActUserManagerFetchUserRequest *request;
+                GSList *next_node;
+
+                request = node->data;
+                next_node = node->next;
+
+                if (request->type == ACT_USER_MANAGER_FETCH_USER_FROM_USERNAME_REQUEST) {
+                        if (g_strcmp0 (request->username, username) == 0)
+                                return request->user;
+                }
+
+                node = next_node;
+        }
+
+        return NULL;
 }
 
 /**
@@ -1883,6 +1975,14 @@ act_user_manager_get_user (ActUserManager *manager,
         g_return_val_if_fail (username != NULL && username[0] != '\0', NULL);
 
         user = lookup_user_by_name (manager, username);
+
+        if (user == NULL) {
+                user = check_fetch_user_requests_for_user (manager, username);
+
+                if (user != NULL) {
+                        g_debug ("ActUserManager: User with username '%s' fetched by username more than once before it loaded", username);
+                }
+        }
 
         /* if we don't have it loaded try to load it now */
         if (user == NULL) {
@@ -1943,6 +2043,32 @@ load_user (ActUserManager *manager,
         _act_user_update_from_object_path (user, object_path);
 }
 
+static ActUser *
+check_fetch_user_requests_for_user_with_id (ActUserManager *manager,
+                                            uid_t           id)
+{
+        ActUserManagerPrivate *priv = act_user_manager_get_instance_private (manager);
+        GSList *node;
+
+        node = priv->fetch_user_requests;
+        while (node != NULL) {
+                ActUserManagerFetchUserRequest *request;
+                GSList *next_node;
+
+                request = node->data;
+                next_node = node->next;
+
+                if (request->type == ACT_USER_MANAGER_FETCH_USER_FROM_ID_REQUEST) {
+                        if (request->uid == id)
+                                return request->user;
+                }
+
+                node = next_node;
+        }
+
+        return NULL;
+}
+
 /**
  * act_user_manager_get_user_by_id:
  * @manager: the manager to query.
@@ -1967,6 +2093,14 @@ act_user_manager_get_user_by_id (ActUserManager *manager,
 
         object_path = g_strdup_printf ("/org/freedesktop/Accounts/User%lu", (gulong) id);
         user = g_hash_table_lookup (priv->users_by_object_path, object_path);
+
+        if (user == NULL) {
+                user = check_fetch_user_requests_for_user_with_id (manager, id);
+
+                if (user != NULL) {
+                        g_debug ("ActUserManager: User with UID %d fetched more than once before it loaded", (int) id);
+                }
+        }
 
         if (user != NULL) {
                 return user;
@@ -2495,6 +2629,14 @@ act_user_manager_finalize (GObject *object)
         g_slist_foreach (priv->fetch_user_requests,
                          (GFunc) free_fetch_user_request, NULL);
         g_slist_free (priv->fetch_user_requests);
+
+        g_slist_foreach (priv->nonexistent_users,
+                         (GFunc) g_object_unref, NULL);
+        g_slist_free (priv->nonexistent_users);
+
+        g_slist_foreach (priv->dopplegangers,
+                         (GFunc) g_object_unref, NULL);
+        g_slist_free (priv->dopplegangers);
 
         g_slist_free (priv->new_users_inhibiting_load);
 

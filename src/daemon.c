@@ -70,6 +70,14 @@ typedef enum
         DISPLAY_MANAGER_TYPE_LIGHTDM
 } DisplayManagerType;
 
+typedef enum
+{
+        USER_RELOAD_TYPE_NONE = 0,
+        USER_RELOAD_TYPE_IMMEDIATELY,
+        USER_RELOAD_TYPE_SOON,
+        USER_RELOAD_TYPE_EVENTUALLY
+} UserReloadType;
+
 typedef struct
 {
         GDBusConnection *bus_connection;
@@ -88,7 +96,9 @@ typedef struct
 
         GQueue          *pending_list_cached_users;
 
+        UserReloadType   reload_type;
         guint            reload_id;
+
         guint            autologin_id;
 
         PolkitAuthority *authority;
@@ -625,6 +635,7 @@ reload_users_timeout (Daemon *daemon)
 
         reload_users (daemon);
         priv->reload_id = 0;
+        priv->reload_type = USER_RELOAD_TYPE_NONE;
 
         g_queue_foreach (priv->pending_list_cached_users,
                          (GFunc) finish_list_cached_users, NULL);
@@ -698,12 +709,18 @@ queue_reload_users_eventually (Daemon *daemon)
          * and out in a continuous loop.
          */
         priv->reload_id = g_timeout_add_seconds (10, (GSourceFunc) reload_users_timeout, daemon);
+        priv->reload_type = USER_RELOAD_TYPE_EVENTUALLY;
 }
 
 static void
 queue_reload_users_soon (Daemon *daemon)
 {
         DaemonPrivate *priv = daemon_get_instance_private (daemon);
+
+        if (priv->reload_type > USER_RELOAD_TYPE_SOON) {
+                g_source_remove (priv->reload_id);
+                priv->reload_id = 0;
+        }
 
         if (priv->reload_id > 0) {
                 return;
@@ -713,6 +730,7 @@ queue_reload_users_soon (Daemon *daemon)
          * /etc/shadow are changed at the same time, or repeatedly.
          */
         priv->reload_id = g_timeout_add (500, (GSourceFunc) reload_users_timeout, daemon);
+        priv->reload_type = USER_RELOAD_TYPE_SOON;
 }
 
 static void
@@ -720,11 +738,17 @@ queue_reload_users (Daemon *daemon)
 {
         DaemonPrivate *priv = daemon_get_instance_private (daemon);
 
+        if (priv->reload_type > USER_RELOAD_TYPE_IMMEDIATELY) {
+                g_source_remove (priv->reload_id);
+                priv->reload_id = 0;
+        }
+
         if (priv->reload_id > 0) {
                 return;
         }
 
         priv->reload_id = g_idle_add ((GSourceFunc) reload_users_timeout, daemon);
+        priv->reload_type = USER_RELOAD_TYPE_IMMEDIATELY;
 }
 
 static void
@@ -1147,6 +1171,7 @@ daemon_list_cached_users (AccountsAccounts      *accounts,
         if (priv->reload_id > 0) {
                 /* reload pending -- finish call in reload_users_timeout */
                 g_queue_push_tail (priv->pending_list_cached_users, data);
+                queue_reload_users (daemon);
         } else {
                 finish_list_cached_users (data);
         }
