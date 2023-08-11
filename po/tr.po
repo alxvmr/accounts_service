@@ -28,7 +28,7 @@ msgstr "Kullanıcı bilgilerinizi değiştirin"
 #: data/org.freedesktop.accounts.policy.in:12
 msgid "Authentication is required to change your own user data"
 msgstr ""
-"Kendi kullanıcı bilginizi değiştirmek için kimlik kanıtlaması gereklidir"
+"Kendi kullanıcı bilginizi değiştirmek için kimlik doğrulaması gereklidir"
 
 #: data/org.freedesktop.accounts.policy.in:21
 msgid "Change your own user password"
@@ -37,7 +37,7 @@ msgstr "Kullanıcı parolanızı değiştirin"
 #: data/org.freedesktop.accounts.policy.in:22
 msgid "Authentication is required to change your own user password"
 msgstr ""
-"Kendi kullanıcı parolanızı değiştirmek için kimlik kanıtlaması gereklidir"
+"Kendi kullanıcı parolanızı değiştirmek için kimlik doğrulaması gereklidir"
 
 #: data/org.freedesktop.accounts.policy.in:31
 msgid "Manage user accounts"
@@ -45,7 +45,7 @@ msgstr "Kullanıcı hesaplarını yönet"
 
 #: data/org.freedesktop.accounts.policy.in:32
 msgid "Authentication is required to change user data"
-msgstr "Kullanıcı bilgisini değiştirmek için kimlik kanıtlaması gereklidir"
+msgstr "Kullanıcı bilgisini değiştirmek için kimlik doğrulaması gereklidir"
 
 #: data/org.freedesktop.accounts.policy.in:41
 msgid "Change the login screen configuration"
@@ -54,7 +54,7 @@ msgstr "Oturum açma ekranı yapılandırmasını değiştirin"
 #: data/org.freedesktop.accounts.policy.in:42
 msgid "Authentication is required to change the login screen configuration"
 msgstr ""
-"Oturum açma ekranı yapılandırmasını değiştirmek için kimlik kanıtlaması "
+"Oturum açma ekranı yapılandırmasını değiştirmek için kimlik doğrulaması "
 "gereklidir"
 
 #: src/main.c:201
@@ -67,7 +67,7 @@ msgstr "Mevcut örneği değiştir"
 
 #: src/main.c:203
 msgid "Enable debugging code"
-msgstr "Hata ayıklama kodunu aktif et"
+msgstr "Hata ayıklama kodunu etkinleştir"
 
 #: src/main.c:222
 msgid ""
