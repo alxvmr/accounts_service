@@ -164,8 +164,9 @@ polkit_gobject_dep = dependency('polkit-gobject-1')
 # (96 bits for sha512crypt, as more is not supported by this method, since
 # the effectively used maximum is 16 base64-encoded characters)
 crypt_dep = dependency('libxcrypt', required: false, version: '>= 4')
-config_h.set('HAVE_CRYPT_GENSALT', crypt_dep.found())
-if not crypt_dep.found()
+if crypt_dep.found() and get_option('libxcrypt')
+  config_h.set('HAVE_CRYPT_GENSALT', 1)
+else
   crypt_dep = cc.find_library('crypt')
 endif
 
