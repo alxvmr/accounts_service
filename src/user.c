@@ -313,8 +313,6 @@ initialize_template_environment (User               *user,
 static void
 user_update_from_template (User *user)
 {
-        g_autofree char *filename = NULL;
-
         g_autoptr (GKeyFile) key_file = NULL;
         g_autoptr (GError) error = NULL;
         g_autoptr (GHashTable) template_variables = NULL;
@@ -333,14 +331,8 @@ user_update_from_template (User *user)
         g_autofree char *contents = NULL;
         g_autofree char *expanded = NULL;
 
-        g_auto (GStrv) lines = NULL;
-
         if (user->template_loaded)
                 return;
-
-        filename = g_build_filename (get_userdir (),
-                                     accounts_user_get_user_name (ACCOUNTS_USER (user)),
-                                     NULL);
 
         account_type = accounts_user_get_account_type (ACCOUNTS_USER (user));
         if (account_type == ACCOUNT_TYPE_ADMINISTRATOR)
@@ -390,7 +382,6 @@ user_update_from_template (User *user)
 
         g_key_file_remove_group (key_file, "Template", NULL);
         contents = g_key_file_to_data (key_file, NULL, NULL);
-        lines = g_strsplit (contents, "\n", -1);
 
         expanded = expand_template_variables (user, template_variables, contents);
 
