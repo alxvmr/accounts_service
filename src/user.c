@@ -213,10 +213,10 @@ expand_template_variables (User       *user,
                                 g_autofree char *variable = NULL;
                                 const char *value;
 
+                                variable = g_strndup (start, p - start);
+
                                 if (brackets && *p == '}')
                                         p++;
-
-                                variable = g_strndup (start, p - start - 1);
 
                                 value = g_hash_table_lookup (template_variables, variable);
                                 if (value) {
