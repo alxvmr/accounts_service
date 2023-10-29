@@ -50,5 +50,9 @@ const char *get_userdir (void);
 const char *get_sysconfdir (void);
 const char *get_icondir (void);
 
+void init_machine_id (void);
+void free_machine_id (void);
+const char *get_machine_id (void);
+
 gboolean compat_check_exit_status (int      estatus,
                                    GError **error);

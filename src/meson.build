@@ -62,6 +62,7 @@ deps = [
   glib_dep,
   libaccounts_generated_dep,
   polkit_gobject_dep,
+  json_dep,
 ]
 
 daemon = executable(

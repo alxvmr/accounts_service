@@ -152,6 +152,7 @@ gio_dep = dependency('gio-2.0', version: '>= ' + glib_min_version)
 gio_unix_dep = dependency('gio-unix-2.0')
 glib_dep = dependency('glib-2.0', version: '>= ' + glib_min_version)
 polkit_gobject_dep = dependency('polkit-gobject-1')
+json_dep = dependency('json-c')
 
 # Using libxcrypt >= 4 we can be sure `crypt_gensalt (NULL, 0, NULL, 0)`
 # always returns a setting that is valid to use with `crypt (pw, setting)`.

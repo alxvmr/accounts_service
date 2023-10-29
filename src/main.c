@@ -259,6 +259,7 @@ main (int   argc,
         g_log_set_default_handler (log_handler, NULL);
 
         init_dirs ();
+        init_machine_id ();
 
         loop = g_main_loop_new (NULL, FALSE);
 
@@ -283,6 +284,7 @@ main (int   argc,
         g_debug ("exiting");
 
         free_dirs ();
+        free_machine_id ();
 
         return EXIT_SUCCESS;
 }

@@ -6,6 +6,8 @@
  * Copyright © 2013 Canonical Limited
  * Copyright (c) 2023 Serenity Cybersecurity, LLC <license@futurecrew.ru>
  *               Author: Gleb Popov <arrowd@FreeBSD.org>
+ * Copyright (c) 2023-2024 GNOME Foundation Inc.
+ *               Contributor: Adrian Vovk
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -33,6 +35,8 @@
 #ifdef HAVE_SHADOW_H
 #include <shadow.h>
 #endif
+
+#include <json-c/json.h>
 
 #include <glib.h>
 #include <glib/gi18n.h>
@@ -510,6 +514,221 @@ user_update_from_pwent (User          *user,
 
         if (!user_has_cache_file (user))
                 user_update_from_template (user);
+        g_object_thaw_notify (G_OBJECT (user));
+}
+
+static void
+user_update_from_json_object (User        *user,
+                              json_object *obj)
+{
+        json_object *member = NULL;
+
+        if (json_object_object_get_ex (obj, "realName", &member)) {
+                g_assert (json_object_get_type (member) == json_type_string);
+                const char *real_name = json_object_get_string (member);
+                g_assert (real_name);
+                accounts_user_set_real_name (ACCOUNTS_USER (user), real_name);
+        }
+
+        if (json_object_object_get_ex (obj, "uid", &member)) {
+                g_assert (json_object_get_type (member) == json_type_int);
+                const uid_t uid = json_object_get_uint64 (member);
+                accounts_user_set_uid (ACCOUNTS_USER (user), uid);
+        }
+
+        if (json_object_object_get_ex (obj, "gid", &member)) {
+                g_assert (json_object_get_type (member) == json_type_int);
+                user->gid = json_object_get_uint64 (member);
+        }
+
+        if (json_object_object_get_ex (obj, "memberOf", &member)) {
+                AccountType type = ACCOUNT_TYPE_STANDARD;
+
+                g_assert (json_object_get_type (member) == json_type_array);
+                for (guint i = 0; i < json_object_array_length (member); i++) {
+                        const char *group = json_object_get_string (json_object_array_get_idx (member, i));
+                        g_assert (group);
+                        if (g_str_equal (group, ADMIN_GROUP)) {
+                                type = ACCOUNT_TYPE_ADMINISTRATOR;
+                                break;
+                        }
+                }
+
+                accounts_user_set_account_type (ACCOUNTS_USER (user), type);
+        }
+
+        if (json_object_object_get_ex (obj, "homeDirectory", &member)) {
+                g_assert (json_object_get_type (member) == json_type_string);
+                const char *home_dir = json_object_get_string (member);
+                g_assert (home_dir);
+                accounts_user_set_home_directory (ACCOUNTS_USER (user), home_dir);
+        }
+
+        if (json_object_object_get_ex (obj, "shell", &member)) {
+                g_assert (json_object_get_type (member) == json_type_string);
+                const char *shell = json_object_get_string (member);
+                g_assert (shell);
+                accounts_user_set_shell (ACCOUNTS_USER (user), shell);
+        }
+
+        if (json_object_object_get_ex (obj, "locked", &member)) {
+                g_assert (json_object_get_type (member) == json_type_boolean);
+                const gboolean locked = json_object_get_boolean (member);
+                accounts_user_set_locked (ACCOUNTS_USER (user), locked);
+        }
+
+        if (json_object_object_get_ex (obj, "passwordChangeNow", &member)) {
+                if (json_object_get_boolean (member))
+                        accounts_user_set_password_mode (ACCOUNTS_USER (user), PASSWORD_MODE_SET_AT_LOGIN);
+        }
+
+        if (json_object_object_get_ex (obj, "notAfterUSec", &member)) {
+                g_assert (json_object_get_type (member) == json_type_int);
+                const guint64 t = json_object_get_uint64 (member);
+                user->user_expiration_time = g_date_time_new_from_unix_utc (t / G_TIME_SPAN_SECOND);
+        }
+
+        if (json_object_object_get_ex (obj, "lastPasswordChangeUSec", &member)) {
+                g_assert (json_object_get_type (member) == json_type_int);
+                const guint64 t = json_object_get_uint64 (member);
+                user->last_change_time = g_date_time_new_from_unix_utc (t / G_TIME_SPAN_SECOND);
+        }
+
+        if (json_object_object_get_ex (obj, "passwordChangeMinUSec", &member)) {
+                g_assert (json_object_get_type (member) == json_type_int);
+                const guint64 t = json_object_get_uint64 (member);
+                user->min_days_between_changes = t / G_TIME_SPAN_DAY;
+        }
+
+        if (json_object_object_get_ex (obj, "passwordChangeMaxUSec", &member)) {
+                g_assert (json_object_get_type (member) == json_type_int);
+                const guint64 t = json_object_get_uint64 (member);
+                user->max_days_between_changes = t / G_TIME_SPAN_DAY;
+        }
+
+        if (json_object_object_get_ex (obj, "passwordChangeWarnUSec", &member)) {
+                g_assert (json_object_get_type (member) == json_type_int);
+                const guint64 t = json_object_get_uint64 (member);
+                user->days_to_warn = t / G_TIME_SPAN_DAY;
+        }
+
+        if (json_object_object_get_ex (obj, "passwordChangeInactiveUSec", &member)) {
+                g_assert (json_object_get_type (member) == json_type_int);
+                const guint64 t = json_object_get_uint64 (member);
+                user->days_after_expiration_until_lock = t / G_TIME_SPAN_DAY;
+        }
+}
+
+static gboolean
+json_per_machine_match (json_object *item,
+                        const char  *member_name,
+                        const char  *expected)
+{
+        json_object *member = NULL;
+
+        if (!json_object_object_get_ex (item, member_name, &member))
+                return FALSE;
+
+        if (json_object_get_type (member) == json_type_string)
+                return g_str_equal (json_object_get_string (member), expected);
+
+        g_assert (json_object_get_type (member) == json_type_array);
+        for (guint i = 0; i < json_object_array_length (member); i++) {
+                const char *got = json_object_get_string (json_object_array_get_idx (member, i));
+                if (g_str_equal (got, expected))
+                        return TRUE;
+        }
+
+        return FALSE;
+}
+
+void
+user_update_from_json (User       *user,
+                       const char *json)
+{
+        const gchar *machine_id = get_machine_id ();
+
+        g_autoptr (json_object) root = NULL;
+        enum json_tokener_error error;
+        json_object *member = NULL;
+
+        root = json_tokener_parse_verbose (json, &error);
+        if (root == NULL) {
+                g_critical ("Failed to parse userdb JSON: %s", json_tokener_error_desc (error));
+                return;
+        }
+        g_assert (json_object_get_type (root) == json_type_object);
+
+        g_object_freeze_notify (G_OBJECT (user));
+
+        accounts_user_set_password_mode (ACCOUNTS_USER (user), PASSWORD_MODE_REGULAR);
+        user->user_expiration_time = NULL;
+        user->last_change_time = NULL;
+        user->min_days_between_changes = -1;
+        user->max_days_between_changes = -1;
+        user->days_to_warn = -1;
+        user->days_after_expiration_until_lock = -1;
+        user->account_expiration_policy_known = TRUE; /* homed always supports these fields, even if they're unset */
+
+        /* userName only exists in the top-level section */
+        json_object_object_get_ex (root, "userName", &member);
+        g_assert (member != NULL);
+        g_assert (json_object_get_type (member) == json_type_string);
+        accounts_user_set_user_name (ACCOUNTS_USER (user), json_object_get_string (member));
+
+        user_update_from_json_object (user, root);
+
+        if (json_object_object_get_ex (root, "perMachine", &member)) {
+                const gchar *hostname = g_get_host_name ();
+
+                g_assert (json_object_get_type (member) == json_type_array);
+                for (guint i = 0; i < json_object_array_length (member); i++) {
+                        json_object *per_machine = json_object_array_get_idx (member, i);
+
+                        if (json_per_machine_match (per_machine, "matchMachineId", machine_id) ||
+                            json_per_machine_match (per_machine, "matchHostname", hostname))
+                                user_update_from_json_object (user, per_machine);
+                }
+        }
+
+        if (json_object_object_get_ex (root, "binding", &member)) {
+                g_assert (json_object_get_type (member) == json_type_object);
+
+                json_object *binding = NULL;
+                if (json_object_object_get_ex (member, machine_id, &binding)) {
+                        g_assert (json_object_get_type (member) == json_type_object);
+                        user_update_from_json_object (user, binding);
+                }
+        }
+
+        /* Some properties we can set only once we have all the data about the user */
+
+        if (accounts_user_get_uid (ACCOUNTS_USER (user)) == 0)
+                accounts_user_set_account_type (ACCOUNTS_USER (user), ACCOUNT_TYPE_ADMINISTRATOR);
+
+        gboolean is_system;
+        if (json_object_object_get_ex (root, "disposition", &member)) {
+                is_system = !g_str_equal (json_object_get_string (member), "regular");
+        } else {
+                /* disposition only exists in the regular section. If missing, the spec
+                 * says we should use a heuristic based on UID/whatever */
+                is_system = !user_classify_is_human (accounts_user_get_uid (ACCOUNTS_USER (user)),
+                                                     accounts_user_get_user_name (ACCOUNTS_USER (user)),
+                                                     accounts_user_get_shell (ACCOUNTS_USER (user)));
+        }
+        accounts_user_set_system_account (ACCOUNTS_USER (user), is_system);
+
+        if (accounts_user_get_home_directory (ACCOUNTS_USER (user)) == NULL) {
+                const char *user_name = accounts_user_get_user_name (ACCOUNTS_USER (user));
+                g_autofree const char *home_dir = g_build_filename ("/home", user_name, NULL);
+                accounts_user_set_home_directory (ACCOUNTS_USER (user), home_dir);
+        }
+
+        if (accounts_user_get_shell (ACCOUNTS_USER (user)) == NULL)
+                accounts_user_set_shell (ACCOUNTS_USER (user), "/usr/bin/bash");
+
+        user_reset_icon_file (user);
+
         g_object_thaw_notify (G_OBJECT (user));
 }
 
@@ -1652,8 +1871,7 @@ user_get_password_expiration_policy_authorized_cb (Daemon                *daemon
                                                    gpointer               data)
 
 {
-        gint64 user_expiration_time;
-        guint64 last_change_time;
+        gint64 user_expiration_time, last_change_time;
 
         if (!user->account_expiration_policy_known) {
                 throw_error (context, ERROR_NOT_SUPPORTED, "account expiration policy unknown to accounts service");
@@ -1664,7 +1882,11 @@ user_get_password_expiration_policy_authorized_cb (Daemon                *daemon
         } else {
                 user_expiration_time = g_date_time_to_unix (user->user_expiration_time);
         }
-        last_change_time = g_date_time_to_unix (user->last_change_time);
+        if (user->last_change_time == NULL) {
+                last_change_time = -1;
+        } else {
+                last_change_time = g_date_time_to_unix (user->last_change_time);
+        }
         accounts_user_complete_get_password_expiration_policy (ACCOUNTS_USER (user),
                                                                context,
                                                                user_expiration_time,

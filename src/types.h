@@ -25,6 +25,8 @@
 
 #include "config.h"
 
+#include <json-c/json.h>
+
 typedef struct Daemon Daemon;
 typedef struct User User;
 
@@ -43,3 +45,5 @@ struct spwd
         unsigned long int sp_flag;
 };
 #endif
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (json_object, json_object_put)

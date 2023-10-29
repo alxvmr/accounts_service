@@ -4,6 +4,8 @@
  * Copyright (c) 2013 Canonical Limited
  * Copyright (c) 2023 Serenity Cybersecurity, LLC <license@futurecrew.ru>
  *               Author: Gleb Popov <arrowd@FreeBSD.org>
+ * Copyright (c) 2023-2024 GNOME Foundation Inc.
+ *               Contributor: Adrian Vovk
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -98,6 +100,7 @@ typedef struct
         GFileMonitor    *group_monitor;  /* (nullable) (owned) */
         GFileMonitor    *dm_monitor;     /* (nullable) (owned) */
         GFileMonitor    *wtmp_monitor;   /* (nullable) (owned) */
+        guint            homed_monitor;
 
         GQueue          *pending_list_cached_users;
 
@@ -112,11 +115,13 @@ typedef struct
         GPtrArray       *extension_monitors; /* (not nullable) (owned) (element-type GFileMonitor) */
 } DaemonPrivate;
 
-typedef struct passwd * (* EntryGeneratorFunc) (Daemon *,
-                                                GHashTable *,
-                                                GHashTable *,
-                                                gpointer *,
-                                                struct spwd **shadow_entry);
+typedef void (* EntryGeneratorFunc) (Daemon *,
+                                     GHashTable *,
+                                     GHashTable *,
+                                     gpointer *,
+                                     struct passwd **pwent,
+                                     struct spwd   **spent,
+                                     char          **json);
 
 typedef struct
 {
@@ -185,6 +190,8 @@ error_get_type (void)
 #ifndef MAX_LOCAL_USERS
 #define MAX_LOCAL_USERS 50
 #endif
+
+static gboolean ensure_system_bus (Daemon *daemon);
 
 /* Get current system Display Manager type */
 static DisplayManagerType
@@ -274,15 +281,15 @@ static GHashTable * build_shadow_users_hash (GHashTable *local_users)
         return shadow_users;
 }
 
-static struct passwd *
-entry_generator_fgetpwent (Daemon       *daemon,
-                           GHashTable   *users,
-                           GHashTable   *local_users,
-                           gpointer     *state,
-                           struct spwd **spent)
+static void
+entry_generator_fgetpwent (Daemon         *daemon,
+                           GHashTable     *users,
+                           GHashTable     *local_users,
+                           gpointer       *state,
+                           struct passwd **pwent,
+                           struct spwd   **spent,
+                           char          **json)
 {
-        struct passwd *pwent;
-
         ShadowEntryBuffers *shadow_entry_buffers;
 
         struct
@@ -308,7 +315,7 @@ entry_generator_fgetpwent (Daemon       *daemon,
                 if (fp == NULL) {
                         g_clear_pointer (&shadow_users, g_hash_table_unref);
                         g_warning ("Unable to open %s: %s", passwd_path, g_strerror (errno));
-                        return NULL;
+                        return;
                 }
 
                 generator_state = g_malloc0 (sizeof(*generator_state));
@@ -322,10 +329,12 @@ entry_generator_fgetpwent (Daemon       *daemon,
         generator_state = *state;
 
         if (g_hash_table_size (users) < MAX_LOCAL_USERS) {
-                pwent = fgetpwent (generator_state->fp);
-                if (pwent != NULL) {
+                *pwent = fgetpwent (generator_state->fp);
+                if (*pwent != NULL) {
+                        struct passwd *p = *pwent;
+
                         shadow_entry_buffers = generator_state->shadow_users
-                                             ? g_hash_table_lookup (generator_state->shadow_users, pwent->pw_name)
+                                             ? g_hash_table_lookup (generator_state->shadow_users, p->pw_name)
                                              : NULL;
                         *spent = NULL;
 
@@ -334,13 +343,13 @@ entry_generator_fgetpwent (Daemon       *daemon,
                         }
 
                         /* Skip system users... */
-                        if (!user_classify_is_human (pwent->pw_uid, pwent->pw_name, pwent->pw_shell)) {
-                                g_debug ("skipping user: %s", pwent->pw_name);
+                        if (!user_classify_is_human (p->pw_uid, p->pw_name, p->pw_shell)) {
+                                g_debug ("skipping user: %s", p->pw_name);
 
-                                return entry_generator_fgetpwent (daemon, users, local_users, state, spent);
+                                entry_generator_fgetpwent (daemon, users, local_users, state, pwent, spent, json);
                         }
 
-                        return pwent;
+                        return;
                 }
         }
 
@@ -349,19 +358,17 @@ entry_generator_fgetpwent (Daemon       *daemon,
                 g_hash_table_unref (generator_state->shadow_users);
         g_free (generator_state);
         *state = NULL;
-
-        return NULL;
 }
 
-static struct passwd *
-entry_generator_cachedir (Daemon       *daemon,
-                          GHashTable   *users,
-                          GHashTable   *local_users,
-                          gpointer     *state,
-                          struct spwd **shadow_entry)
+static void
+entry_generator_cachedir (Daemon         *daemon,
+                          GHashTable     *users,
+                          GHashTable     *local_users,
+                          gpointer       *state,
+                          struct passwd **pwent,
+                          struct spwd   **spent,
+                          char          **json)
 {
-        struct passwd *pwent;
-
         g_autoptr (GError) error = NULL;
         gboolean regular;
         GHashTableIter iter;
@@ -374,7 +381,7 @@ entry_generator_cachedir (Daemon       *daemon,
                 if (error != NULL) {
                         if (!g_error_matches (error, G_FILE_ERROR, G_FILE_ERROR_NOENT))
                                 g_warning ("couldn't list user cache directory: %s", get_userdir ());
-                        return NULL;
+                        return;
                 }
         }
 
@@ -399,13 +406,13 @@ entry_generator_cachedir (Daemon       *daemon,
 
                 if (regular) {
                         errno = 0;
-                        pwent = getpwnam (name);
-                        if (pwent != NULL) {
+                        *pwent = getpwnam (name);
+                        if (*pwent != NULL) {
 #ifdef HAVE_SHADOW_H
-                                *shadow_entry = getspnam (pwent->pw_name);
+                                *spent = getspnam ((*pwent)->pw_name);
 #endif
 
-                                return pwent;
+                                return;
                         } else if (errno == 0) {
                                 g_debug ("user '%s' in cache dir but not present on system, removing", name);
                                 remove_cache_files (name);
@@ -438,18 +445,18 @@ entry_generator_cachedir (Daemon       *daemon,
         }
 
         *state = NULL;
-        return NULL;
 }
 
-static struct passwd *
-entry_generator_requested_users (Daemon       *daemon,
-                                 GHashTable   *users,
-                                 GHashTable   *local_users,
-                                 gpointer     *state,
-                                 struct spwd **shadow_entry)
+static void
+entry_generator_requested_users (Daemon         *daemon,
+                                 GHashTable     *users,
+                                 GHashTable     *local_users,
+                                 gpointer       *state,
+                                 struct passwd **pwent,
+                                 struct spwd   **spent,
+                                 char          **json)
 {
         DaemonPrivate *priv = daemon_get_instance_private (daemon);
-        struct passwd *pwent;
         GList *node;
 
         /* First iteration */
@@ -470,15 +477,14 @@ entry_generator_requested_users (Daemon       *daemon,
                         *state = node;
 
                         if (!g_hash_table_lookup (users, name)) {
-                                pwent = getpwnam (name);
-                                if (pwent == NULL) {
+                                *pwent = getpwnam (name);
+                                if (*pwent == NULL) {
                                         g_debug ("user '%s' requested previously but not present on system", name);
                                 } else {
 #ifdef HAVE_SHADOW_H
-                                        *shadow_entry = getspnam (pwent->pw_name);
+                                        *spent = getspnam ((*pwent)->pw_name);
 #endif
-
-                                        return pwent;
+                                        return;
                                 }
                         }
                 }
@@ -487,7 +493,169 @@ entry_generator_requested_users (Daemon       *daemon,
         /* Last iteration */
 
         *state = NULL;
-        return NULL;
+        return;
+}
+
+static void
+homed_clear_pwent (struct passwd *pwent)
+{
+        g_clear_pointer (&pwent->pw_name, free);
+        pwent->pw_uid = (uid_t) -1;
+        pwent->pw_gid = (gid_t) -1;
+        g_clear_pointer (&pwent->pw_gecos, free);
+        g_clear_pointer (&pwent->pw_dir, free);
+        g_clear_pointer (&pwent->pw_shell, free);
+}
+
+static char *
+daemon_get_homed_user_record (Daemon     *daemon,
+                              const char *user_name,
+                              uid_t       uid,
+                              GError    **error)
+{
+        DaemonPrivate *priv = daemon_get_instance_private (daemon);
+
+        g_autofree char *json = NULL;
+
+        g_autoptr (GVariant) retval = NULL;
+        g_autoptr (GError) inner_error = NULL;
+        const char *method = NULL;
+        GVariant *args = NULL;
+        gboolean incomplete;
+
+        if (user_name != NULL) {
+                method = "GetUserRecordByName";
+                args = g_variant_new ("(s)", user_name);
+        } else if (uid != -1) {
+                method = "GetUserRecordByUID";
+                args = g_variant_new ("(u)", uid);
+        } else {
+                g_assert_not_reached ();
+        }
+
+        if (!ensure_system_bus (daemon)) {
+                g_set_error (error, ERROR, ERROR_FAILED, "Failed to init system bus");
+                return NULL;
+        }
+        retval = g_dbus_connection_call_sync (priv->bus_connection,
+                                              "org.freedesktop.home1",
+                                              "/org/freedesktop/home1",
+                                              "org.freedesktop.home1.Manager",
+                                              method,
+                                              args,
+                                              G_VARIANT_TYPE ("(sbo)"),
+                                              G_DBUS_CALL_FLAGS_NONE,
+                                              -1,
+                                              NULL,
+                                              &inner_error);
+        if (inner_error != NULL) {
+                g_set_error (error, ERROR, ERROR_USER_DOES_NOT_EXIST,
+                             "Couldn't get record for user %s: %s. Bailing!",
+                             user_name, inner_error->message);
+                return NULL;
+        }
+
+        g_variant_get (retval, "(sbo)", &json, &incomplete, NULL);
+
+        if (incomplete) {
+                g_set_error (error, ERROR, ERROR_FAILED,
+                             "Record for user %s is incomplete",
+                             user_name);
+                return NULL;
+        }
+
+        return g_steal_pointer (&json);
+}
+
+static void
+entry_generator_homed (Daemon         *daemon,
+                       GHashTable     *users,
+                       GHashTable     *local_users,
+                       gpointer       *state,
+                       struct passwd **pwent,
+                       struct spwd   **spent,
+                       char          **json)
+{
+        DaemonPrivate *priv = daemon_get_instance_private (daemon);
+
+        g_autoptr (GError) error = NULL;
+        struct
+        {
+                GVariantIter *iter;
+                struct passwd pwent;
+        } *s = NULL;
+
+        /* First iteration */
+
+        if (*state == NULL) {
+                g_autoptr (GVariant) retval = NULL, home_areas = NULL;
+
+                if (!ensure_system_bus (daemon))
+                        return;
+                retval = g_dbus_connection_call_sync (priv->bus_connection,
+                                                      "org.freedesktop.home1",
+                                                      "/org/freedesktop/home1",
+                                                      "org.freedesktop.home1.Manager",
+                                                      "ListHomes",
+                                                      NULL,
+                                                      g_variant_type_new ("(a(susussso))"),
+                                                      G_DBUS_CALL_FLAGS_NONE,
+                                                      -1,
+                                                      NULL,
+                                                      &error);
+                if (error != NULL) {
+                        g_warning ("couldn't list homed users: %s", error->message);
+                        return;
+                }
+
+                home_areas = g_variant_get_child_value (retval, 0);
+
+                s = g_malloc0 (sizeof(*s));
+                s->iter = g_variant_iter_new (home_areas);
+                *state = s;
+        }
+
+        /* Every ieration */
+        s = *state;
+        if (g_hash_table_size (local_users) < MAX_LOCAL_USERS) {
+                g_autofree char *status = NULL;
+
+                homed_clear_pwent (&s->pwent);
+                if (!g_variant_iter_next (s->iter, "(susussso)",
+                                          &s->pwent.pw_name,
+                                          &s->pwent.pw_uid,
+                                          &status,
+                                          &s->pwent.pw_gid,
+                                          &s->pwent.pw_gecos,
+                                          &s->pwent.pw_dir,
+                                          &s->pwent.pw_shell,
+                                          NULL))
+                        goto finished;
+
+                if (g_str_equal (status, "absent")) {
+                        g_debug ("skipping absent homed user: %s", s->pwent.pw_name);
+                        entry_generator_homed (daemon, users, local_users, state, pwent, spent, json);
+                        return;
+                }
+
+                *json = daemon_get_homed_user_record (daemon, s->pwent.pw_name, s->pwent.pw_uid, &error);
+                if (error != NULL) {
+                        g_warning ("Failed to get user record for %s: %s",
+                                   s->pwent.pw_name, error->message);
+                        goto finished;
+                }
+
+                *pwent = &s->pwent;
+                g_hash_table_add (local_users, g_strdup (s->pwent.pw_name));
+                return;
+        }
+
+        /* Last iteration */
+finished:
+        g_clear_pointer (json, free);
+        g_variant_iter_free (s->iter);
+        homed_clear_pwent (&s->pwent);
+        g_clear_pointer (state, free);
 }
 
 static void
@@ -499,15 +667,17 @@ load_entries (Daemon            *daemon,
 {
         DaemonPrivate *priv = daemon_get_instance_private (daemon);
         gpointer generator_state = NULL;
-        struct passwd *pwent;
+        struct passwd *pwent = NULL;
         struct spwd *spent = NULL;
         User *user = NULL;
 
         g_assert (entry_generator != NULL);
 
         for (;;) {
+                g_autofree char *json = NULL;
+                pwent = NULL;
                 spent = NULL;
-                pwent = entry_generator (daemon, users, local_users, &generator_state, &spent);
+                entry_generator (daemon, users, local_users, &generator_state, &pwent, &spent, &json);
                 if (pwent == NULL)
                         break;
 
@@ -528,7 +698,10 @@ load_entries (Daemon            *daemon,
 
                         /* freeze & update users not already in the new list */
                         g_object_freeze_notify (G_OBJECT (user));
-                        user_update_from_pwent (user, pwent, spent);
+                        if (json != NULL)
+                                user_update_from_json (user, json);
+                        else
+                                user_update_from_pwent (user, pwent, spent);
 
                         g_hash_table_insert (users, g_strdup (user_get_user_name (user)), user);
                         g_debug ("loaded user: %s", user_get_user_name (user));
@@ -588,6 +761,9 @@ reload_users (Daemon *daemon)
 
         /* Load the local users into our hash tables */
         load_entries (daemon, users, local_users, FALSE, entry_generator_fgetpwent);
+
+        /* Now get the users from homed */
+        load_entries (daemon, users, local_users, FALSE, entry_generator_homed);
 
         /* Now add/update users from other sources, possibly non-local */
         load_entries (daemon, users, local_users, TRUE, entry_generator_cachedir);
@@ -814,6 +990,20 @@ on_users_monitor_changed (GFileMonitor     *monitor,
 }
 
 static void
+on_homed_users_monitor_changed (GDBusConnection *conn,
+                                const gchar     *sender_name,
+                                const gchar     *object_path,
+                                const gchar     *iface_name,
+                                const gchar     *signal_name,
+                                GVariant        *params,
+                                gpointer         userdata)
+{
+        Daemon *daemon = userdata;
+
+        queue_reload_users_soon (daemon);
+}
+
+static void
 on_dm_monitor_changed (GFileMonitor     *monitor,
                        GFile            *file,
                        GFile            *other_file,
@@ -906,6 +1096,28 @@ setup_monitor (Daemon             *daemon,
         return monitor;
 }
 
+static guint
+setup_homed_monitor (Daemon *daemon)
+{
+        DaemonPrivate *priv = daemon_get_instance_private (daemon);
+
+        if (!ensure_system_bus (daemon)) {
+                g_warning ("Failed to init system bus to set up homed monitor!");
+                return 0;
+        }
+
+        return g_dbus_connection_signal_subscribe (priv->bus_connection,
+                                                   "org.freedesktop.home1",
+                                                   NULL, /* any interface */
+                                                   NULL, /* any member */
+                                                   NULL, /* any object path */
+                                                   NULL, /* any arg0 */
+                                                   G_DBUS_SIGNAL_FLAGS_NONE,
+                                                   on_homed_users_monitor_changed,
+                                                   daemon,
+                                                   NULL);
+}
+
 static void
 daemon_init (Daemon *daemon)
 {
@@ -953,6 +1165,8 @@ daemon_init (Daemon *daemon)
                                             MONITOR_TYPE_FILE,
                                             on_users_monitor_changed);
 
+        priv->homed_monitor = setup_homed_monitor (daemon);
+
         dm_type = get_current_system_dm_type ();
         if (dm_type == DISPLAY_MANAGER_TYPE_LIGHTDM)
                 dm_path = g_strdup (PATH_LIGHTDM_CONF);
@@ -974,6 +1188,8 @@ daemon_dispose (GObject *object)
         Daemon *daemon = DAEMON (object);
         DaemonPrivate *priv = daemon_get_instance_private (daemon);
 
+        if (priv->homed_monitor != 0)
+                g_dbus_connection_signal_unsubscribe (priv->bus_connection, priv->homed_monitor);
         g_clear_object (&priv->bus_connection);
 
         g_clear_object (&priv->autologin);
@@ -1027,23 +1243,36 @@ daemon_finalize (GObject *object)
 }
 
 static gboolean
+ensure_system_bus (Daemon *daemon)
+{
+        DaemonPrivate *priv = daemon_get_instance_private (daemon);
+
+        g_autoptr (GError) error = NULL;
+
+        if (priv->bus_connection == NULL)
+                priv->bus_connection = g_bus_get_sync (G_BUS_TYPE_SYSTEM, NULL, &error);
+        if (priv->bus_connection == NULL) {
+                if (error != NULL)
+                        g_critical ("error getting system bus: %s", error->message);
+                return FALSE;
+        }
+
+        return TRUE;
+}
+
+static gboolean
 register_accounts_daemon (Daemon *daemon)
 {
         DaemonPrivate *priv = daemon_get_instance_private (daemon);
 
         g_autoptr (GError) error = NULL;
 
+        ensure_system_bus (daemon);
+
         priv->authority = polkit_authority_get_sync (NULL, &error);
         if (priv->authority == NULL) {
                 if (error != NULL)
                         g_critical ("error getting polkit authority: %s", error->message);
-                return FALSE;
-        }
-
-        priv->bus_connection = g_bus_get_sync (G_BUS_TYPE_SYSTEM, NULL, &error);
-        if (priv->bus_connection == NULL) {
-                if (error != NULL)
-                        g_critical ("error getting system bus: %s", error->message);
                 return FALSE;
         }
 

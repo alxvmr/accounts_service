@@ -450,3 +450,29 @@ get_icondir (void)
 {
         return icondir;
 }
+
+static char *machine_id = NULL;
+
+
+void
+init_machine_id (void)
+{
+        g_autoptr (GError) error = NULL;
+
+        if (!g_file_get_contents ("/etc/machine-id", &machine_id, NULL, &error))
+                g_error ("Failed to read machine-id: %s", error->message);
+
+        machine_id = g_strchomp (machine_id);
+}
+
+void
+free_machine_id (void)
+{
+        g_free (machine_id);
+}
+
+const char *
+get_machine_id (void)
+{
+        return machine_id;
+}
