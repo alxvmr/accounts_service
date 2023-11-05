@@ -220,6 +220,9 @@ config_h.set_quoted('PATH_GDM_CUSTOM', gdm_conf_file)
 lightdm_conf_file = get_option('lightdmconffile')
 config_h.set_quoted('PATH_LIGHTDM_CONF', lightdm_conf_file)
 
+create_homed = get_option('create_homed')
+config_h.set10('CREATE_HOMED', create_homed)
+
 if get_option('elogind')
   logind_dep = dependency('libelogind', version: '>= 229.4')
 else
@@ -256,5 +259,6 @@ output += '** DocBook documentation build: ' + enable_docbook.to_string() + '\n'
 output += '** Administrator group: ' + admin_group + '\n'
 output += '** Extra administrator groups: ' + extra_admin_groups + '\n'
 output += '** GDM configuration: ' + gdm_conf_file + '\n'
-output += '** LightDM configuration: ' + lightdm_conf_file
+output += '** LightDM configuration: ' + lightdm_conf_file + '\n'
+output += '** Create homed users: ' + create_homed.to_string()
 message(output)

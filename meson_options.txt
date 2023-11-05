@@ -14,3 +14,5 @@ option('vapi', type: 'boolean', value: true, description : 'Enable Vala bindings
 
 option('docbook', type: 'boolean', value: false, description: 'build documentation (requires xmlto)')
 option('gtk_doc', type: 'boolean', value: false, description: 'use gtk-doc to build documentation')
+
+option('create_homed', type: 'boolean', value: false, description: 'Use systemd-homed to create new user accounts')

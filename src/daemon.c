@@ -42,6 +42,8 @@
 #include <errno.h>
 #include <sys/types.h>
 
+#include <json-c/json.h>
+
 #include <glib.h>
 #include <glib/gi18n.h>
 #include <glib-object.h>
@@ -55,6 +57,7 @@
 #include "util.h"
 #include "user.h"
 #include "accounts-user-generated.h"
+#include "crypt-util.h"
 
 #define PATH_PASSWD "passwd"
 #define PATH_SHADOW "shadow"
@@ -1324,49 +1327,66 @@ throw_error (GDBusMethodInvocation *context,
 }
 
 static User *
-add_new_user_for_pwent (Daemon        *daemon,
-                        struct passwd *pwent,
-                        struct spwd   *spent)
+daemon_ensure_user (Daemon      *daemon,
+                    const gchar *name,
+                    uid_t        uid,
+                    gboolean     expect_homed,
+                    GError     **error)
 {
         DaemonPrivate *priv = daemon_get_instance_private (daemon);
-        User *user;
 
-        user = user_new (daemon, pwent->pw_uid);
-        user_update_from_pwent (user, pwent, spent);
+        g_autofree char *json = NULL;
+        struct passwd *pwent = NULL;
+        User *user = NULL;
+
+        json = daemon_get_homed_user_record (daemon, name, uid, expect_homed ? error : NULL);
+        if (expect_homed && json == NULL)
+                return NULL;
+
+        if (name != NULL) {
+                pwent = getpwnam (name);
+                if (pwent == NULL) {
+                        g_set_error (error, ERROR, ERROR_USER_DOES_NOT_EXIST,
+                                     "Failed to find user by name '%s'", name);
+                        return NULL;
+                }
+        } else if (uid != -1) {
+                pwent = getpwuid (uid);
+                if (pwent == NULL) {
+                        g_set_error (error, ERROR, ERROR_USER_DOES_NOT_EXIST,
+                                     "Failed to find user by uid %d", uid);
+                        return NULL;
+                }
+        } else {
+                g_assert_not_reached ();
+        }
+
+        user = g_hash_table_lookup (priv->users, pwent->pw_name);
+        if (user != NULL)
+                return user;
+
+        user = user_new (daemon, -1);
+
+        if (json != NULL) {
+                user_update_from_json (user, json);
+        } else {
+                struct spwd *spent = NULL;
+#ifdef HAVE_SHADOW_H
+                spent = getspnam (pwent->pw_name);
+#endif
+                user_update_from_pwent (user, pwent, spent);
+        }
+
         user_register (user);
 
         g_hash_table_insert (priv->users,
                              g_strdup (user_get_user_name (user)),
                              user);
 
-        accounts_accounts_emit_user_added (ACCOUNTS_ACCOUNTS (daemon), user_get_object_path (user));
+        accounts_accounts_emit_user_added (ACCOUNTS_ACCOUNTS (daemon),
+                                           user_get_object_path (user));
 
-        return user;
-}
-
-User *
-daemon_local_find_user_by_id (Daemon *daemon,
-                              uid_t   uid)
-{
-        DaemonPrivate *priv = daemon_get_instance_private (daemon);
-        User *user;
-        struct passwd *pwent;
-
-        pwent = getpwuid (uid);
-        if (pwent == NULL) {
-                g_debug ("unable to lookup uid %d", (int) uid);
-                return NULL;
-        }
-
-        user = g_hash_table_lookup (priv->users, pwent->pw_name);
-
-        if (user == NULL) {
-                struct spwd *spent = NULL;
-#ifdef HAVE_SHADOW_H
-                spent = getspnam (pwent->pw_name);
-#endif
-                user = add_new_user_for_pwent (daemon, pwent, spent);
-
+        if (json == NULL) {
                 priv->explicitly_requested_users = g_list_append (priv->explicitly_requested_users,
                                                                   g_strdup (pwent->pw_name));
         }
@@ -1378,30 +1398,14 @@ User *
 daemon_local_find_user_by_name (Daemon      *daemon,
                                 const gchar *name)
 {
-        DaemonPrivate *priv = daemon_get_instance_private (daemon);
-        User *user;
-        struct passwd *pwent;
+        return daemon_ensure_user (daemon, name, -1, FALSE, NULL);
+}
 
-        pwent = getpwnam (name);
-        if (pwent == NULL) {
-                g_debug ("unable to lookup name %s: %s", name, g_strerror (errno));
-                return NULL;
-        }
-
-        user = g_hash_table_lookup (priv->users, pwent->pw_name);
-
-        if (user == NULL) {
-                struct spwd *spent = NULL;
-#ifdef HAVE_SHADOW_H
-                spent = getspnam (pwent->pw_name);
-#endif
-                user = add_new_user_for_pwent (daemon, pwent, spent);
-
-                priv->explicitly_requested_users = g_list_append (priv->explicitly_requested_users,
-                                                                  g_strdup (pwent->pw_name));
-        }
-
-        return user;
+User *
+daemon_local_find_user_by_id (Daemon *daemon,
+                              uid_t   uid)
+{
+        return daemon_ensure_user (daemon, NULL, uid, FALSE, NULL);
 }
 
 User *
@@ -1650,41 +1654,146 @@ create_data_free (gpointer data)
         g_free (cd);
 }
 
+#if CREATE_HOMED
+
+static User *
+daemon_create_user_backend (Daemon         *daemon,
+                            CreateUserData *cd,
+                            GStrv           admin_groups,
+                            GError        **error)
+{
+        const char *password = ""; /* homed doesn't support passwordless users yet, so we set an empty passwd instead */
+        g_autofree gchar *hashed = hash_password (password);
+
+        DaemonPrivate *priv = daemon_get_instance_private (daemon);
+        GError *inner_error = NULL;
+
+        g_autoptr (json_object) obj = NULL, secret = NULL, privileged = NULL;
+        g_autoptr (json_object) password_arr = NULL, hashed_arr = NULL;
+        uint64_t now = 0;
+
+        obj = json_object_new_object ();
+        json_object_object_add (obj, "disposition", json_object_new_string ("regular"));
+        json_object_object_add (obj, "userName", json_object_new_string (cd->user_name));
+        json_object_object_add (obj, "realName", json_object_new_string (cd->real_name));
+
+        /* Otherwise homed is very unhappy about our weak password */
+        json_object_object_add (obj, "enforcePasswordPolicy", json_object_new_boolean (FALSE));
+
+        now = g_get_real_time ();
+        json_object_object_add (obj, "lastChangeUSec", json_object_new_uint64 (now));
+        json_object_object_add (obj, "lastPasswordChangeUSec", json_object_new_uint64 (now));
+
+        if (admin_groups != NULL) {
+                g_autoptr (json_object) member_of = json_object_new_array ();
+                for (gsize i = 0; admin_groups[i] != NULL; i++) {
+                        json_object_array_add (member_of, json_object_new_string (admin_groups[i]));
+                }
+                json_object_object_add (obj, "memberOf", g_steal_pointer (&member_of));
+        }
+
+        secret = json_object_new_object ();
+        password_arr = json_object_new_array_ext (1);
+        json_object_array_add (password_arr, json_object_new_string (password));
+        json_object_object_add (secret, "password", g_steal_pointer (&password_arr));
+        json_object_object_add (obj, "secret", g_steal_pointer (&secret));
+
+        privileged = json_object_new_object ();
+        hashed_arr = json_object_new_array_ext (1);
+        json_object_array_add (hashed_arr, json_object_new_string (hashed));
+        json_object_object_add (privileged, "hashedPassword", g_steal_pointer (&hashed_arr));
+        json_object_object_add (obj, "privileged", g_steal_pointer (&privileged));
+
+        if (!ensure_system_bus (daemon)) {
+                g_set_error (error, ERROR, ERROR_FAILED, "Failed to init system bus");
+                return NULL;
+        }
+        g_dbus_connection_call_sync (priv->bus_connection,
+                                     "org.freedesktop.home1",
+                                     "/org/freedesktop/home1",
+                                     "org.freedesktop.home1.Manager",
+                                     "CreateHome",
+                                     g_variant_new ("(s)", json_object_to_json_string (obj)),
+                                     NULL,
+                                     G_DBUS_CALL_FLAGS_NONE,
+                                     HOMED_BUS_LONG_TIMEOUT,
+                                     NULL,
+                                     &inner_error);
+        if (inner_error != NULL) {
+                g_propagate_prefixed_error (error, inner_error, "Failed to create homed user: ");
+                return NULL;
+        }
+
+        return daemon_ensure_user (daemon, cd->user_name, -1, TRUE, error);
+}
+
+#else
+
+static User *
+daemon_create_user_backend (Daemon         *daemon,
+                            CreateUserData *cd,
+                            GStrv           admin_groups_array,
+                            GError        **error)
+{
+        g_autofree char *admin_groups = NULL;
+        GError *inner_error = NULL;
+        User *user = NULL;
+        const gchar *argv[9] = { NULL };
+        int i = 0;
+
+        argv[i++] = "/usr/sbin/useradd";
+        argv[i++] = "-m";
+        argv[i++] = "-c";
+        argv[i++] = cd->real_name;
+
+        if (admin_groups != NULL) {
+                admin_groups = g_strjoinv (",", admin_groups_array);
+
+                argv[i++] = "-G";
+                argv[i++] = admin_groups;
+        }
+
+        argv[i++] = "--";
+        argv[i++] = cd->user_name;
+        argv[i++] = NULL;
+
+        if (!spawn_sync (argv, &inner_error)) {
+                g_propagate_prefixed_error (error, inner_error, "Failed to run useradd: ");
+                return NULL;
+        }
+
+        user = daemon_local_find_user_by_name (daemon, cd->user_name);
+        user_update_local_account_property (user, TRUE);
+        user_update_system_account_property (user, FALSE);
+        cache_user (daemon, user);
+        return user;
+}
+#endif
+
 static void
 daemon_create_user_authorized_cb (Daemon                *daemon,
                                   User                  *dummy,
                                   GDBusMethodInvocation *context,
                                   gpointer               data)
-
 {
-        CreateUserData *cd = data;
-        User *user;
-
         g_autoptr (GError) error = NULL;
-        const gchar *argv[9];
-        g_autofree gchar *admin_groups = NULL;
+        g_auto (GStrv) admin_groups = NULL;
+
+        CreateUserData *cd = data;
+        User *user = NULL;
 
         if (getpwnam (cd->user_name) != NULL) {
                 throw_error (context, ERROR_USER_EXISTS, "A user with name '%s' already exists", cd->user_name);
                 return;
         }
 
-        sys_log (context, "create user '%s'", cd->user_name);
-
-        argv[0] = "/usr/sbin/useradd";
-        argv[1] = "-m";
-        argv[2] = "-c";
-        argv[3] = cd->real_name;
         if (cd->account_type == ACCOUNT_TYPE_ADMINISTRATOR) {
-                g_auto (GStrv) admin_groups_array = NULL;
                 g_autoptr (GStrvBuilder) admin_groups_builder = g_strv_builder_new ();
 
                 g_strv_builder_add (admin_groups_builder, ADMIN_GROUP);
-
                 if (EXTRA_ADMIN_GROUPS != NULL && EXTRA_ADMIN_GROUPS[0] != '\0') {
                         g_auto (GStrv) extra_admin_groups = NULL;
                         extra_admin_groups = g_strsplit (EXTRA_ADMIN_GROUPS, ",", 0);
-
                         for (gsize i = 0; extra_admin_groups[i] != NULL; i++) {
                                 if (getgrnam (extra_admin_groups[i]) != NULL)
                                         g_strv_builder_add (admin_groups_builder, extra_admin_groups[i]);
@@ -1692,35 +1801,21 @@ daemon_create_user_authorized_cb (Daemon                *daemon,
                                         g_warning ("Extra admin group %s doesn’t exist: not adding the user to it", extra_admin_groups[i]);
                         }
                 }
-                admin_groups_array = g_strv_builder_end (admin_groups_builder);
-                admin_groups = g_strjoinv (",", admin_groups_array);
-
-                argv[4] = "-G";
-                argv[5] = admin_groups;
-                argv[6] = "--";
-                argv[7] = cd->user_name;
-                argv[8] = NULL;
+                admin_groups = g_strv_builder_end (admin_groups_builder);
+                sys_log (context, "create admin user '%s'", cd->user_name);
         } else if (cd->account_type == ACCOUNT_TYPE_STANDARD) {
-                argv[4] = "--";
-                argv[5] = cd->user_name;
-                argv[6] = NULL;
+                sys_log (context, "create standard user '%s'", cd->user_name);
         } else {
                 throw_error (context, ERROR_FAILED, "Don't know how to add user of type %d", cd->account_type);
                 return;
         }
 
-        if (!spawn_sync (argv, &error)) {
-                throw_error (context, ERROR_FAILED, "running '%s' failed: %s", argv[0], error->message);
-                return;
-        }
+        user = daemon_create_user_backend (daemon, cd, admin_groups, &error);
 
-        user = daemon_local_find_user_by_name (daemon, cd->user_name);
-        user_update_local_account_property (user, TRUE);
-        user_update_system_account_property (user, FALSE);
-
-        cache_user (daemon, user);
-
-        accounts_accounts_complete_create_user (NULL, context, user_get_object_path (user));
+        if (error == NULL)
+                accounts_accounts_complete_create_user (NULL, context, user_get_object_path (user));
+        else
+                g_dbus_method_invocation_return_gerror (context, error);
 }
 
 static gboolean

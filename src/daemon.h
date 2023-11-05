@@ -29,6 +29,8 @@
 #include "user.h"
 #include "accounts-generated.h"
 
+#define HOMED_BUS_LONG_TIMEOUT (2 * 60 * 1000) /* 2 minutes */
+
 #define TYPE_DAEMON         (daemon_get_type ())
 #define DAEMON(o)           (G_TYPE_CHECK_INSTANCE_CAST ((o), TYPE_DAEMON, Daemon))
 #define DAEMON_CLASS(k)     (G_TYPE_CHECK_CLASS_CAST ((k), TYPE_DAEMON, DaemonClass))
