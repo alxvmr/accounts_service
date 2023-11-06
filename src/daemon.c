@@ -1951,6 +1951,68 @@ typedef struct
 } DeleteUserData;
 
 static void
+daemon_delete_shadow_user (Daemon                *daemon,
+                           GDBusMethodInvocation *context,
+                           User                  *user,
+                           gboolean               rm_files,
+                           GError               **error)
+{
+        GError *inner_error = NULL;
+        const gchar *username;
+        const gchar *homedir;
+        gchar *resolved_homedir;
+        const gchar *argv[6];
+        int i = 0;
+
+        username = accounts_user_get_user_name (ACCOUNTS_USER (user));
+
+        /* Never delete the root filesystem. */
+        homedir = accounts_user_get_home_directory (ACCOUNTS_USER (user));
+        resolved_homedir = realpath (homedir, NULL);
+        if (resolved_homedir != NULL && g_strcmp0 (resolved_homedir, "/") == 0) {
+                sys_log (context, "Refusing to delete home directory of user '%s' because it is root filesystem", username);
+                rm_files = FALSE;
+        }
+        free (resolved_homedir);
+
+        argv[i++] = "/usr/sbin/userdel";
+        argv[i++] = "-f";
+
+        if (rm_files)
+                argv[i++] = "-r";
+
+        argv[i++] = "--";
+        argv[i++] = username;
+        argv[i++] = NULL;
+
+        if (!spawn_sync (argv, &inner_error))
+                g_propagate_prefixed_error (error, inner_error, "Failed to run userdel: ");
+}
+
+static void
+daemon_delete_homed_user (Daemon  *daemon,
+                          User    *user,
+                          GError **error)
+{
+        DaemonPrivate *priv = daemon_get_instance_private (daemon);
+        const char *username = accounts_user_get_user_name (ACCOUNTS_USER (user));
+
+        if (!ensure_system_bus (daemon))
+                return;
+        g_dbus_connection_call_sync (priv->bus_connection,
+                                     "org.freedesktop.home1",
+                                     "/org/freedesktop/home1",
+                                     "org.freedesktop.home1.Manager",
+                                     "RemoveHome",
+                                     g_variant_new ("(s)", username),
+                                     NULL,
+                                     G_DBUS_CALL_FLAGS_NONE,
+                                     HOMED_BUS_LONG_TIMEOUT,
+                                     NULL,
+                                     error);
+}
+
+static void
 daemon_delete_user_authorized_cb (Daemon                *daemon,
                                   User                  *dummy,
                                   GDBusMethodInvocation *context,
@@ -1962,63 +2024,40 @@ daemon_delete_user_authorized_cb (Daemon                *daemon,
 
         g_autoptr (GError) error = NULL;
         struct passwd *pwent;
-        const gchar *argv[6];
-        const gchar *homedir;
-        gchar *resolved_homedir;
         User *user;
 
         pwent = getpwuid (ud->uid);
+        user = daemon_local_find_user_by_id (daemon, ud->uid);
 
-        if (pwent == NULL) {
+        if (pwent == NULL || user == NULL) {
                 throw_error (context, ERROR_USER_DOES_NOT_EXIST, "No user with uid %d found", ud->uid);
                 return;
         }
 
         sys_log (context, "delete user '%s' (%d)", pwent->pw_name, ud->uid);
 
-        user = daemon_local_find_user_by_id (daemon, ud->uid);
+        user_set_cached (user, FALSE);
+        user_set_saved (user, FALSE);
 
-        if (user != NULL) {
-                user_set_cached (user, FALSE);
-
-                if (priv->autologin == user) {
-                        daemon_local_set_automatic_login (daemon, user, FALSE, NULL);
-                }
+        if (priv->autologin == user) {
+                daemon_local_set_automatic_login (daemon, user, FALSE, NULL);
         }
 
         remove_cache_files (pwent->pw_name);
 
-        user_set_saved (user, FALSE);
+        if (user_get_uses_homed (user)) {
+                if (!ud->remove_files) /* In homed, existing files means existing user */
+                        sys_log (context, "Deleting home directory of homed-managed user '%s' despite request", pwent->pw_name);
 
-        /* Never delete the root filesystem. */
-        homedir = accounts_user_get_home_directory (ACCOUNTS_USER (user));
-        resolved_homedir = realpath (homedir, NULL);
-        if (resolved_homedir != NULL && g_strcmp0 (resolved_homedir, "/") == 0) {
-                sys_log (context, "Refusing to delete home directory of user '%s' because it is root filesystem", pwent->pw_name);
-                ud->remove_files = FALSE;
-        }
-        free (resolved_homedir);
-
-        argv[0] = "/usr/sbin/userdel";
-        if (ud->remove_files) {
-                argv[1] = "-f";
-                argv[2] = "-r";
-                argv[3] = "--";
-                argv[4] = pwent->pw_name;
-                argv[5] = NULL;
+                daemon_delete_homed_user (daemon, user, &error);
         } else {
-                argv[1] = "-f";
-                argv[2] = "--";
-                argv[3] = pwent->pw_name;
-                argv[4] = NULL;
+                daemon_delete_shadow_user (daemon, context, user, ud->remove_files, &error);
         }
 
-        if (!spawn_sync (argv, &error)) {
-                throw_error (context, ERROR_FAILED, "running '%s' failed: %s", argv[0], error->message);
-                return;
-        }
-
-        accounts_accounts_complete_delete_user (NULL, context);
+        if (error == NULL)
+                accounts_accounts_complete_delete_user (NULL, context);
+        else
+                g_dbus_method_invocation_return_gerror (context, error);
 }
 
 

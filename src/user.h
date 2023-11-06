@@ -67,6 +67,7 @@ void           user_update_local_account_property (User    *user,
                                                    gboolean local);
 void           user_update_system_account_property (User    *user,
                                                     gboolean system);
+gboolean       user_get_uses_homed (User *user);
 gboolean       user_get_cached (User *user);
 void           user_set_cached (User    *user,
                                 gboolean cached);

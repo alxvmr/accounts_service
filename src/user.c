@@ -81,6 +81,9 @@ struct User
         gboolean             local_account_overridden;
 
         GHashTable          *extensions;  /* (owned) (element-type utf8 GDBusInterfaceInfo) */
+
+        gboolean             uses_homed;
+
         guint               *extension_ids;
         guint                n_extension_ids;
 
@@ -660,6 +663,7 @@ user_update_from_json (User       *user,
         g_assert (json_object_get_type (root) == json_type_object);
 
         g_object_freeze_notify (G_OBJECT (user));
+        user->uses_homed = TRUE;
 
         accounts_user_set_password_mode (ACCOUNTS_USER (user), PASSWORD_MODE_REGULAR);
         user->user_expiration_time = NULL;
@@ -1358,6 +1362,12 @@ const gchar *
 user_get_shell (User *user)
 {
         return accounts_user_get_shell (ACCOUNTS_USER (user));
+}
+
+gboolean
+user_get_uses_homed (User *user)
+{
+        return user->uses_homed;
 }
 
 gboolean
@@ -2994,6 +3004,7 @@ user_accounts_user_iface_init (AccountsUserIface *iface)
 static void
 user_init (User *user)
 {
+        user->uses_homed = FALSE;
         user->system_bus_connection = NULL;
         user->default_icon_file = NULL;
         user->login_history = NULL;
