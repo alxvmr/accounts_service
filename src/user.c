@@ -1471,6 +1471,11 @@ user_set_real_name (AccountsUser          *auser,
         int uid;
         const gchar *action_id;
 
+        if (user->uses_homed) {
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                return TRUE;
+        }
+
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
                 return TRUE;
@@ -1546,6 +1551,11 @@ user_set_user_name (AccountsUser          *auser,
 {
         User *user = (User *) auser;
 
+        if (user->uses_homed) {
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                return TRUE;
+        }
+
         daemon_local_check_auth (user->daemon,
                                  user,
                                  "org.freedesktop.accounts.user-administration",
@@ -1585,6 +1595,11 @@ user_set_email (AccountsUser          *auser,
         User *user = (User *) auser;
         int uid;
         const gchar *action_id;
+
+        if (user->uses_homed) {
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                return TRUE;
+        }
 
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
@@ -1646,6 +1661,11 @@ user_set_languages (AccountsUser          *auser,
         User *user = (User *) auser;
         int uid;
         const gchar *action_id;
+
+        if (user->uses_homed) {
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                return TRUE;
+        }
 
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
@@ -1709,6 +1729,11 @@ user_set_language (AccountsUser          *auser,
         int uid;
         const gchar *action_id;
 
+        if (user->uses_homed) {
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                return TRUE;
+        }
+
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
                 return TRUE;
@@ -1756,6 +1781,11 @@ user_set_session (AccountsUser          *auser,
         User *user = (User *) auser;
         int uid;
         const gchar *action_id;
+
+        if (user->uses_homed) {
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                return TRUE;
+        }
 
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
@@ -1805,6 +1835,11 @@ user_set_session_type (AccountsUser          *auser,
         int uid;
         const gchar *action_id;
 
+        if (user->uses_homed) {
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                return TRUE;
+        }
+
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
                 return TRUE;
@@ -1852,6 +1887,11 @@ user_set_x_session (AccountsUser          *auser,
         User *user = (User *) auser;
         int uid;
         const gchar *action_id;
+
+        if (user->uses_homed) {
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                return TRUE;
+        }
 
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
@@ -2007,6 +2047,11 @@ user_set_password_expiration_policy (AccountsUser          *auser,
         const gchar *action_id;
         PasswordExpirationPolicy *pwd_expiration = NULL;
 
+        if (user->uses_homed) {
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                return TRUE;
+        }
+
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
                 return TRUE;
@@ -2085,6 +2130,11 @@ user_set_user_expiration_policy (AccountsUser          *auser,
         int uid;
         const gchar *action_id;
 
+        if (user->uses_homed) {
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                return TRUE;
+        }
+
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
                 return TRUE;
@@ -2132,6 +2182,11 @@ user_set_location (AccountsUser          *auser,
         User *user = (User *) auser;
         int uid;
         const gchar *action_id;
+
+        if (user->uses_homed) {
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                return TRUE;
+        }
 
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
@@ -2201,6 +2256,11 @@ user_set_home_directory (AccountsUser          *auser,
 {
         User *user = (User *) auser;
 
+        if (user->uses_homed) {
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                return TRUE;
+        }
+
         daemon_local_check_auth (user->daemon,
                                  user,
                                  "org.freedesktop.accounts.user-administration",
@@ -2255,6 +2315,11 @@ user_set_shell (AccountsUser          *auser,
                 const gchar           *shell)
 {
         User *user = (User *) auser;
+
+        if (user->uses_homed) {
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                return TRUE;
+        }
 
         daemon_local_check_auth (user->daemon,
                                  user,
@@ -2416,6 +2481,11 @@ user_set_icon_file (AccountsUser          *auser,
         int uid;
         const gchar *action_id;
 
+        if (user->uses_homed) {
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                return TRUE;
+        }
+
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
                 return TRUE;
@@ -2504,6 +2574,11 @@ user_set_locked (AccountsUser          *auser,
                  gboolean               locked)
 {
         User *user = (User *) auser;
+
+        if (user->uses_homed) {
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                return TRUE;
+        }
 
         daemon_local_check_auth (user->daemon,
                                  user,
@@ -2611,6 +2686,11 @@ user_set_account_type (AccountsUser          *auser,
 {
         User *user = (User *) auser;
 
+        if (user->uses_homed) {
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                return TRUE;
+        }
+
         if (account_type < 0 || account_type > ACCOUNT_TYPE_LAST) {
                 throw_error (context, ERROR_FAILED, "unknown account type: %d", account_type);
                 return TRUE;
@@ -2715,6 +2795,11 @@ user_set_password_mode (AccountsUser          *auser,
         const gchar *action_id;
         gint uid;
 
+        if (user->uses_homed) {
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                return TRUE;
+        }
+
         if (mode < 0 || mode > PASSWORD_MODE_LAST) {
                 throw_error (context, ERROR_FAILED, "unknown password mode: %d", mode);
                 return TRUE;
@@ -2809,6 +2894,11 @@ user_set_password (AccountsUser          *auser,
         const gchar *action_id;
         gint uid;
 
+        if (user->uses_homed) {
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                return TRUE;
+        }
+
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
                 return TRUE;
@@ -2870,6 +2960,11 @@ user_set_password_hint (AccountsUser          *auser,
         int uid;
         const gchar *action_id;
 
+        if (user->uses_homed) {
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                return TRUE;
+        }
+
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
                 return TRUE;
@@ -2926,6 +3021,11 @@ user_set_automatic_login (AccountsUser          *auser,
                           gboolean               enabled)
 {
         User *user = (User *) auser;
+
+        if (user->uses_homed) {
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                return TRUE;
+        }
 
         daemon_local_check_auth (user->daemon,
                                  user,
