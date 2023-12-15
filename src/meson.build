@@ -1,6 +1,9 @@
-sources = []
-
-gdbus_headers = []
+sources = files(
+        'crypt-util.c'
+)
+headers = files(
+        'crypt-util.h'
+)
 
 ifaces = [
   ['accounts-generated', 'org.freedesktop.', 'Accounts'],
@@ -16,12 +19,13 @@ foreach iface: ifaces
     extra_args: ['--glib-min-required', '2.64'],
   )
   sources += gdbus_sources
-  gdbus_headers += gdbus_sources[1]
+  headers += gdbus_sources[1]
 endforeach
 
 deps = [
   gio_dep,
   gio_unix_dep,
+  crypt_dep,
 ]
 
 cflags = [
@@ -32,19 +36,19 @@ cflags = [
   '-DUSERDIR="@0@"'.format(join_paths(act_localstatedir, 'lib', 'AccountsService', 'users')),
 ]
 
-libaccounts_generated = static_library(
-  'accounts-generated',
+libaccounts_shared = static_library(
+  'accounts-shared',
   sources: sources,
   include_directories: top_inc,
   dependencies: deps,
   c_args: cflags,
 )
 
-libaccounts_generated_dep = declare_dependency(
-  sources: gdbus_headers,
+libaccounts_shared_dep = declare_dependency(
+  sources: headers,
   include_directories: include_directories('.'),
   dependencies: gio_dep,
-  link_with: libaccounts_generated,
+  link_with: libaccounts_shared,
 )
 
 sources = files(
@@ -60,7 +64,7 @@ sources = files(
 deps = [
   gio_unix_dep,
   glib_dep,
-  libaccounts_generated_dep,
+  libaccounts_shared_dep,
   polkit_gobject_dep,
   json_dep,
 ]

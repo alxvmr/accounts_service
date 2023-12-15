@@ -29,10 +29,9 @@ enum_sources = gnome.mkenums(
 )
 
 deps = [
-  crypt_dep,
   gio_unix_dep,
   glib_dep,
-  libaccounts_generated_dep,
+  libaccounts_shared_dep,
   logind_dep,
 ]
 

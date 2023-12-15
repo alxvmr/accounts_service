@@ -26,14 +26,11 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#ifdef HAVE_CRYPT_H
-#include <crypt.h>
-#endif
-
 #include <glib.h>
 #include <glib/gi18n.h>
 #include <gio/gio.h>
 
+#include "crypt-util.h"
 #include "act-user-private.h"
 #include "accounts-user-generated.h"
 
@@ -1750,53 +1747,6 @@ act_user_set_account_type (ActUser           *user,
         }
 }
 
-#ifdef HAVE_CRYPT_GENSALT
-static gchar *
-generate_salt_for_crypt_hash (void)
-{
-        return g_strdup (crypt_gensalt (NULL, 0, NULL, 0));
-}
-#else
-static const gchar
-salt_char (GRand *rand)
-{
-        const gchar salt[] = "ABCDEFGHIJKLMNOPQRSTUVXYZ"
-                             "abcdefghijklmnopqrstuvxyz"
-                             "./0123456789";
-
-        return salt[g_rand_int_range (rand, 0, G_N_ELEMENTS (salt))];
-}
-
-static gchar *
-generate_salt_for_crypt_hash (void)
-{
-        g_autoptr (GString) salt = NULL;
-        g_autoptr (GRand) rand = NULL;
-        gint i;
-
-        rand = g_rand_new ();
-        salt = g_string_sized_new (21);
-
-        /* sha512crypt */
-        g_string_append (salt, "$6$");
-        for (i = 0; i < 16; i++) {
-                g_string_append_c (salt, salt_char (rand));
-        }
-        g_string_append_c (salt, '$');
-
-        return g_strdup (salt->str);
-}
-#endif
-
-static gchar *
-make_crypted (const gchar *plain)
-{
-        g_autofree char *salt = NULL;
-
-        salt = generate_salt_for_crypt_hash ();
-        return g_strdup (crypt (plain, salt));
-}
-
 /**
  * act_user_set_password:
  * @user: the user object to alter.
@@ -1814,15 +1764,15 @@ act_user_set_password (ActUser     *user,
                        const gchar *hint)
 {
         g_autoptr (GError) error = NULL;
-        g_autofree gchar *crypted = NULL;
+        g_autofree gchar *hashed = NULL;
 
         g_return_if_fail (ACT_IS_USER (user));
         g_return_if_fail (password != NULL);
         g_return_if_fail (ACCOUNTS_IS_USER (user->accounts_proxy));
 
-        crypted = make_crypted (password);
+        hashed = hash_password (password);
         if (!accounts_user_call_set_password_sync (user->accounts_proxy,
-                                                   crypted,
+                                                   hashed,
                                                    hint,
                                                    G_DBUS_CALL_FLAGS_ALLOW_INTERACTIVE_AUTHORIZATION,
                                                    -1,
@@ -1830,7 +1780,7 @@ act_user_set_password (ActUser     *user,
                                                    &error)) {
                 g_warning ("SetPassword call failed: %s", error->message);
         }
-        memset (crypted, 0, strlen (crypted));
+        memset (hashed, 0, strlen (hashed));
 }
 
 /**
