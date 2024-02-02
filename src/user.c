@@ -524,6 +524,7 @@ static void
 user_update_from_json_object (User        *user,
                               json_object *obj)
 {
+        g_auto (GStrv) additional_langs = NULL;
         json_object *member = NULL;
 
         if (json_object_object_get_ex (obj, "realName", &member)) {
@@ -620,6 +621,83 @@ user_update_from_json_object (User        *user,
                 const guint64 t = json_object_get_uint64 (member);
                 user->days_after_expiration_until_lock = t / G_TIME_SPAN_DAY;
         }
+
+        if (json_object_object_get_ex (obj, "additionalLanguages", &member)) {
+                g_autoptr (GStrvBuilder) builder = NULL;
+
+                g_assert (json_object_get_type (member) == json_type_array);
+
+                builder = g_strv_builder_new ();
+                for (guint i = 0; i < json_object_array_length (member); i++) {
+                        const char *language = json_object_get_string (json_object_array_get_idx (member, i));
+                        g_assert (language);
+                        g_strv_builder_add (builder, language);
+                }
+                additional_langs = g_strv_builder_end (builder);
+        }
+        if (json_object_object_get_ex (obj, "preferredLanguage", &member)) {
+                g_autoptr (GStrvBuilder) builder = NULL;
+                g_auto (GStrv) all_langs = NULL;
+
+                g_assert (json_object_get_type (member) == json_type_string);
+                const char *language = json_object_get_string (member);
+                g_assert (language);
+
+                builder = g_strv_builder_new ();
+                g_strv_builder_add (builder, language);
+                if (additional_langs != NULL)
+                        g_strv_builder_addv (builder, (const char **) additional_langs);
+                all_langs = g_strv_builder_end (builder);
+
+                accounts_user_set_languages (ACCOUNTS_USER (user), (const gchar *const *) all_langs);
+                accounts_user_set_language (ACCOUNTS_USER (user), language);
+        } else if (additional_langs != NULL) {
+                accounts_user_set_languages (ACCOUNTS_USER (user), (const gchar *const *) additional_langs);
+                accounts_user_set_language (ACCOUNTS_USER (user), additional_langs[0]);
+        }
+
+        if (json_object_object_get_ex (obj, "emailAddress", &member)) {
+                g_assert (json_object_get_type (member) == json_type_string);
+                const char *email = json_object_get_string (member);
+                g_assert (email);
+                accounts_user_set_email (ACCOUNTS_USER (user), email);
+        }
+
+        if (json_object_object_get_ex (obj, "location", &member)) {
+                g_assert (json_object_get_type (member) == json_type_string);
+                const char *location = json_object_get_string (member);
+                g_assert (location);
+                accounts_user_set_location (ACCOUNTS_USER (user), location);
+        }
+
+        if (json_object_object_get_ex (obj, "blobDirectory", &member)) {
+                g_autofree gchar *filename = NULL;
+
+                g_assert (json_object_get_type (member) == json_type_string);
+                const char *blob_dir = json_object_get_string (member);
+                g_assert (blob_dir);
+
+                filename = g_build_filename (blob_dir, "avatar", NULL);
+                if (g_file_test (filename, G_FILE_TEST_EXISTS))
+                        accounts_user_set_icon_file (ACCOUNTS_USER (user), filename);
+                else
+                        accounts_user_set_icon_file (ACCOUNTS_USER (user), NULL);
+                g_clear_pointer (&filename, g_free);
+        }
+
+        if (json_object_object_get_ex (obj, "preferredSessionLauncher", &member)) {
+                g_assert (json_object_get_type (member) == json_type_string);
+                const char *session = json_object_get_string (member);
+                g_assert (session);
+                accounts_user_set_session (ACCOUNTS_USER (user), session);
+        }
+
+        if (json_object_object_get_ex (obj, "preferredSessionType", &member)) {
+                g_assert (json_object_get_type (member) == json_type_string);
+                const char *type = json_object_get_string (member);
+                g_assert (type);
+                accounts_user_set_session_type (ACCOUNTS_USER (user), type);
+        }
 }
 
 static gboolean
@@ -702,6 +780,18 @@ user_update_from_json (User       *user,
                 if (json_object_object_get_ex (member, machine_id, &binding)) {
                         g_assert (json_object_get_type (member) == json_type_object);
                         user_update_from_json_object (user, binding);
+                }
+        }
+
+        if (json_object_object_get_ex (root, "privileged", &member)) {
+                g_assert (json_object_get_type (member) == json_type_object);
+                json_object *priv_member = NULL;
+
+                if (json_object_object_get_ex (member, "passwordHint", &priv_member)) {
+                        g_assert (json_object_get_type (priv_member) == json_type_string);
+                        const char *password_hint = json_object_get_string (priv_member);
+                        g_assert (password_hint);
+                        accounts_user_set_password_hint (ACCOUNTS_USER (user), password_hint);
                 }
         }
 
@@ -832,6 +922,9 @@ user_update_from_cache (User *user)
         g_autofree gchar *filename = NULL;
 
         g_autoptr (GKeyFile) key_file = NULL;
+
+        if (user->uses_homed)
+                return; /* homed is the one and only source of truth for the users it manages. */
 
         filename = g_build_filename (get_userdir (), accounts_user_get_user_name (ACCOUNTS_USER (user)), NULL);
 
@@ -1079,7 +1172,7 @@ user_extension_authentication_done (Daemon                *daemon,
         GDBusInterfaceInfo *interface = user_data;
         const gchar *method_name;
 
-        if (!user_has_cache_file (user))
+        if (!user_has_cache_file (user) && !user->uses_homed)
                 user_update_from_template (user);
 
         method_name = g_dbus_method_invocation_get_method_name (invocation);
