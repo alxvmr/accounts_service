@@ -2782,11 +2782,73 @@ become_user (gpointer data)
 }
 
 static void
-user_change_icon_file_authorized_cb (Daemon                *daemon,
-                                     User                  *user,
-                                     GDBusMethodInvocation *context,
-                                     gpointer               data)
+user_change_icon_file_homed_authorized_cb (Daemon                *daemon,
+                                           User                  *user,
+                                           GDBusMethodInvocation *context,
+                                           gpointer               data)
+{
+        g_autoptr (GError) error = NULL;
+        g_autoptr (json_object) record = NULL;
+        g_autoptr (GHashTable) blobs = NULL;
 
+        const gchar *filename = data;
+
+        g_object_freeze_notify (G_OBJECT (user));
+
+        record = user_prepare_update_json (g_dbus_method_invocation_get_connection (context),
+                                           accounts_user_get_user_name (ACCOUNTS_USER (user)),
+                                           &error);
+        if (record == NULL) {
+                throw_error (context, ERROR_FAILED, "Failed to prepare JSON record for updating %s: %s",
+                             accounts_user_get_user_name (ACCOUNTS_USER (user)), error->message);
+                return;
+        }
+
+        blobs = user_prepare_blobs (user, &error);
+        if (record == NULL) {
+                throw_error (context, ERROR_FAILED, "Failed to prepare blobs for updating %s: %s",
+                             accounts_user_get_user_name (ACCOUNTS_USER (user)), error->message);
+                return;
+        }
+
+        if (filename != NULL && *filename != '\0') {
+                int fd;
+
+                fd = open (filename, O_RDONLY | O_CLOEXEC);
+                if (fd < 0) {
+                        int saved_errno = errno;
+                        throw_error (context, ERROR_FAILED, "Couldn't open '%s': %s", filename, g_strerror (saved_errno));
+                        return;
+                }
+
+                g_hash_table_replace (blobs, g_strdup ("avatar"), GINT_TO_POINTER (fd));
+        } else {
+                g_hash_table_remove (blobs, "avatar");
+                accounts_user_set_icon_file (ACCOUNTS_USER (user), NULL);
+        }
+
+        homed_update (g_dbus_method_invocation_get_connection (context), record, blobs, &error);
+        if (error != NULL) {
+                throw_error (context, ERROR_FAILED, "Failed to update %s: %s",
+                             accounts_user_get_user_name (ACCOUNTS_USER (user)), error->message);
+                return;
+        }
+
+        /* We're not actually changing the path (it's always going to be `avatar` in the blob dir)
+         * but let's still notify clients about the replaced file */
+        accounts_user_emit_changed (ACCOUNTS_USER (user));
+        g_object_notify (G_OBJECT (user), "icon-file");
+
+        g_object_thaw_notify (G_OBJECT (user));
+
+        accounts_user_complete_set_icon_file (ACCOUNTS_USER (user), context);
+}
+
+static void
+user_change_icon_file_classic_authorized_cb (Daemon                *daemon,
+                                             User                  *user,
+                                             GDBusMethodInvocation *context,
+                                             gpointer               data)
 {
         g_autofree gchar *filename = NULL;
 
@@ -2917,11 +2979,6 @@ user_set_icon_file (AccountsUser          *auser,
         int uid;
         const gchar *action_id;
 
-        if (user->uses_homed) {
-                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
-                return TRUE;
-        }
-
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
                 return TRUE;
@@ -2935,7 +2992,8 @@ user_set_icon_file (AccountsUser          *auser,
         daemon_local_check_auth (user->daemon,
                                  user,
                                  action_id,
-                                 user_change_icon_file_authorized_cb,
+                                 user->uses_homed ? user_change_icon_file_homed_authorized_cb
+                                                  : user_change_icon_file_classic_authorized_cb,
                                  context,
                                  g_strdup (filename),
                                  (GDestroyNotify) g_free);
