@@ -1937,7 +1937,7 @@ user_set_user_name (AccountsUser          *auser,
         User *user = (User *) auser;
 
         if (user->uses_homed) {
-                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user name for user managed by systemd-homed");
                 return TRUE;
         }
 
@@ -2776,7 +2776,7 @@ user_set_home_directory (AccountsUser          *auser,
         User *user = (User *) auser;
 
         if (user->uses_homed) {
-                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change home directory for user managed by systemd-homed");
                 return TRUE;
         }
 
@@ -3654,7 +3654,7 @@ user_set_password (AccountsUser          *auser,
         gint uid;
 
         if (user->uses_homed) {
-                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change passwords for user managed by systemd-homed");
                 return TRUE;
         }
 
