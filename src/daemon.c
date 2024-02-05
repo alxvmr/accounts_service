@@ -510,14 +510,12 @@ homed_clear_pwent (struct passwd *pwent)
         g_clear_pointer (&pwent->pw_shell, free);
 }
 
-static char *
-daemon_get_homed_user_record (Daemon     *daemon,
-                              const char *user_name,
-                              uid_t       uid,
-                              GError    **error)
+char *
+bus_get_homed_user_record (GDBusConnection *bus,
+                           const char      *user_name,
+                           uid_t            uid,
+                           GError         **error)
 {
-        DaemonPrivate *priv = daemon_get_instance_private (daemon);
-
         g_autofree char *json = NULL;
 
         g_autoptr (GVariant) retval = NULL;
@@ -536,11 +534,7 @@ daemon_get_homed_user_record (Daemon     *daemon,
                 g_assert_not_reached ();
         }
 
-        if (!ensure_system_bus (daemon)) {
-                g_set_error (error, ERROR, ERROR_FAILED, "Failed to init system bus");
-                return NULL;
-        }
-        retval = g_dbus_connection_call_sync (priv->bus_connection,
+        retval = g_dbus_connection_call_sync (bus,
                                               "org.freedesktop.home1",
                                               "/org/freedesktop/home1",
                                               "org.freedesktop.home1.Manager",
@@ -568,6 +562,22 @@ daemon_get_homed_user_record (Daemon     *daemon,
         }
 
         return g_steal_pointer (&json);
+}
+
+static char *
+daemon_get_homed_user_record (Daemon     *daemon,
+                              const char *user_name,
+                              uid_t       uid,
+                              GError    **error)
+{
+        DaemonPrivate *priv = daemon_get_instance_private (daemon);
+
+        if (!ensure_system_bus (daemon)) {
+                g_set_error (error, ERROR, ERROR_FAILED, "Failed to init system bus");
+                return NULL;
+        }
+
+        return bus_get_homed_user_record (priv->bus_connection, user_name, uid, error);
 }
 
 static void
@@ -1627,6 +1637,9 @@ cache_user (Daemon *daemon,
 {
         g_autofree gchar *filename = NULL;
         const gchar *user_name;
+
+        if (user_get_uses_homed (user))
+                return;
 
         /* Always use the canonical user name looked up */
         user_name = user_get_user_name (user);

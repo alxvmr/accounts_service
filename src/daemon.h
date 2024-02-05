@@ -30,6 +30,7 @@
 #include "accounts-generated.h"
 
 #define HOMED_BUS_LONG_TIMEOUT (2 * 60 * 1000) /* 2 minutes */
+#define HOMED_UPDATE_FLAGS_OFFLINE (UINT64_C(1) << 0)
 
 #define TYPE_DAEMON         (daemon_get_type ())
 #define DAEMON(o)           (G_TYPE_CHECK_INSTANCE_CAST ((o), TYPE_DAEMON, Daemon))
@@ -97,3 +98,8 @@ gboolean   daemon_local_set_automatic_login (Daemon  *daemon,
 
 GHashTable * daemon_read_extension_ifaces (char ***directories_out);
 GHashTable * daemon_dup_extension_ifaces (Daemon *daemon);
+
+char * bus_get_homed_user_record (GDBusConnection *bus,
+                                  const char      *user_name,
+                                  uid_t            uid,
+                                  GError         **error);

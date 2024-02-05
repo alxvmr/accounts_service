@@ -26,6 +26,7 @@
 
 #include "config.h"
 
+#include <fcntl.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -83,6 +84,7 @@ struct User
         GHashTable          *extensions;  /* (owned) (element-type utf8 GDBusInterfaceInfo) */
 
         gboolean             uses_homed;
+        gchar               *blob_dir;
 
         guint               *extension_ids;
         guint                n_extension_ids;
@@ -677,6 +679,8 @@ user_update_from_json_object (User        *user,
                 const char *blob_dir = json_object_get_string (member);
                 g_assert (blob_dir);
 
+                user->blob_dir = g_strdup (blob_dir);
+
                 filename = g_build_filename (blob_dir, "avatar", NULL);
                 if (g_file_test (filename, G_FILE_TEST_EXISTS))
                         accounts_user_set_icon_file (ACCOUNTS_USER (user), filename);
@@ -1023,6 +1027,264 @@ save_extra_data (User *user)
         g_file_set_contents (filename, data, -1, &error);
 
         user_set_saved (user, TRUE);
+}
+
+static json_object *
+user_prepare_update_json (GDBusConnection *bus,
+                          const char      *user_name,
+                          GError         **error)
+{
+        g_autofree char *json = NULL;
+
+        g_autoptr (json_object) obj = NULL;
+
+        json_object *timestamp;
+        enum json_tokener_error json_err;
+
+        json = bus_get_homed_user_record (bus, user_name, -1, error);
+        if (json == NULL)
+                return NULL;
+
+        obj = json_tokener_parse_verbose (json, &json_err);
+        if (obj == NULL) {
+                g_set_error (error, ERROR, ERROR_FAILED,
+                             "Couldn't parse JSON record for updating user %s: %s",
+                             user_name, json_tokener_error_desc (json_err));
+                return NULL;
+        }
+        g_assert (json_object_get_type (obj) == json_type_object);
+
+        json_object_object_del (obj, "status");
+        json_object_object_del (obj, "binding");
+        json_object_object_del (obj, "signature");
+        json_object_object_del (obj, "blobManifest");
+
+        timestamp = json_object_new_uint64 (g_get_real_time ());
+        json_object_object_add (obj, "lastChangeUSec", timestamp);
+
+        return g_steal_pointer (&obj);
+}
+
+static void
+user_json_apply_extra_data (User        *user,
+                            json_object *obj)
+{
+        const gchar *val;
+        const gchar * const *languages;
+        json_object *privileged = NULL;
+
+        val = accounts_user_get_email (ACCOUNTS_USER (user));
+        if (val != NULL)
+                json_object_object_add (obj, "emailAddress", json_object_new_string (val));
+        else
+                json_object_object_del (obj, "emailAddress");
+
+        languages = accounts_user_get_languages (ACCOUNTS_USER (user));
+        val = accounts_user_get_language (ACCOUNTS_USER (user));
+        if (languages != NULL) {
+                const char *preferred = NULL;
+                json_object *additional = NULL;
+
+                preferred = val != NULL ? val : languages[0];
+
+                additional = json_object_new_array_ext (g_strv_length ((char **) languages));
+                for (size_t i = 0; i < g_strv_length ((char **) languages); i++) {
+                        if (!g_str_equal (languages[i], preferred))
+                                json_object_array_add (additional, json_object_new_string (languages[i]));
+                }
+
+                json_object_object_add (obj, "preferredLanguage", json_object_new_string (preferred));
+                if (json_object_array_length (additional) > 0)
+                        json_object_object_add (obj, "additionalLanguages", additional);
+                else
+                        json_object_object_del (obj, "additionalLanguages");
+        } else {
+                if (val != NULL)
+                        json_object_object_add (obj, "preferredLanguage", json_object_new_string (val));
+                else
+                        json_object_object_del (obj, "preferredLanguage");
+                json_object_object_del (obj, "additionalLanguages");
+        }
+
+        val = accounts_user_get_session (ACCOUNTS_USER (user));
+        if (val == NULL)
+                val = accounts_user_get_xsession (ACCOUNTS_USER (user));
+        if (val != NULL)
+                json_object_object_add (obj, "preferredSessionLauncher", json_object_new_string (val));
+        else
+                json_object_object_del (obj, "preferredSessionLauncher");
+
+        val = accounts_user_get_session_type (ACCOUNTS_USER (user));
+        if (val != NULL)
+                json_object_object_add (obj, "preferredSessionType", json_object_new_string (val));
+        else
+                json_object_object_del (obj, "preferredSessionType");
+
+        val = accounts_user_get_location (ACCOUNTS_USER (user));
+        if (val != NULL)
+                json_object_object_add (obj, "location", json_object_new_string (val));
+        else
+                json_object_object_del (obj, "location");
+
+        val = accounts_user_get_password_hint (ACCOUNTS_USER (user));
+        if (json_object_object_get_ex (obj, "privileged", &privileged)) {
+                g_assert (json_object_get_type (privileged) == json_type_object);
+                if (val != NULL)
+                        json_object_object_add (privileged, "passwordHint", json_object_new_string (val));
+                else
+                        json_object_object_del (privileged, "passwordHint");
+        }
+}
+
+static void
+blob_free (gpointer data)
+{
+        g_close (GPOINTER_TO_INT (data), NULL);
+}
+
+static GHashTable *
+user_prepare_blobs (User    *user,
+                    GError **error)
+{
+        g_autoptr (GError) inner_error = NULL;
+        g_autoptr (GHashTable) blobs = NULL;
+        g_autoptr (GDir) dir = NULL;
+
+        const gchar *blob = NULL;
+
+        blobs = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, blob_free);
+
+        if (!user->blob_dir)
+                return g_steal_pointer (&blobs);
+
+        dir = g_dir_open (user->blob_dir, 0, &inner_error);
+        if (dir == NULL) {
+                g_propagate_prefixed_error (error, inner_error,
+                                            "Failed to open blob dir for %s: ",
+                                            accounts_user_get_user_name (ACCOUNTS_USER (user)));
+                return NULL;
+        }
+
+        while ((blob = g_dir_read_name (dir)) != NULL) {
+                g_autofree gchar *filename = NULL;
+                gint fd;
+
+                filename = g_build_filename (user->blob_dir, blob, NULL);
+
+                fd = open (filename, O_RDONLY | O_CLOEXEC);
+                if (fd < 0) {
+                        int saved_errno = errno;
+                        g_set_error (error, G_FILE_ERROR, g_file_error_from_errno (saved_errno),
+                                     "Failed to open blob %s for user %s: %s", blob,
+                                     accounts_user_get_user_name (ACCOUNTS_USER (user)),
+                                     g_strerror (saved_errno));
+                        return NULL;
+                }
+
+                g_hash_table_insert (blobs, g_strdup (blob), GINT_TO_POINTER (fd));
+        }
+
+        return g_steal_pointer (&blobs);
+}
+
+static void
+homed_update (GDBusConnection *bus,
+              json_object     *record,
+              GHashTable      *blobs_map,
+              GError         **error)
+{
+        g_autoptr (GVariant) blobs = NULL;
+        g_autoptr (GUnixFDList) blob_fds = NULL;
+
+        const gchar *json;
+        GVariantBuilder blobs_bld;
+        GHashTableIter iter;
+        gpointer key, value;
+        guint64 flags = 0;
+
+        json = json_object_to_json_string_ext (record, JSON_C_TO_STRING_PLAIN);
+
+        g_variant_builder_init (&blobs_bld, G_VARIANT_TYPE ("a{sh}"));
+        g_hash_table_iter_init (&iter, blobs_map);
+        blob_fds = g_unix_fd_list_new ();
+        while (g_hash_table_iter_next (&iter, &key, &value)) {
+                GError *inner_error = NULL;
+                gint idx;
+
+                idx = g_unix_fd_list_append (blob_fds, GPOINTER_TO_INT (value), &inner_error);
+                if (idx < 0) {
+                        g_propagate_error (error, inner_error);
+                        return;
+                }
+
+                g_variant_builder_add (&blobs_bld, "{sh}", key, idx);
+        }
+        blobs = g_variant_ref_sink (g_variant_builder_end (&blobs_bld));
+
+        while (TRUE) {
+                GError *inner_error = NULL;
+
+                g_dbus_connection_call_with_unix_fd_list_sync (
+                        bus,
+                        "org.freedesktop.home1",
+                        "/org/freedesktop/home1",
+                        "org.freedesktop.home1.Manager",
+                        "UpdateHomeEx",
+                        g_variant_new ("(s@a{sh}t)", json, blobs, flags),
+                        NULL,
+                        G_DBUS_CALL_FLAGS_NONE,
+                        HOMED_BUS_LONG_TIMEOUT,
+                        blob_fds,
+                        NULL,
+                        NULL,
+                        &inner_error);
+
+                if (inner_error == NULL)
+                        break;
+
+                if (flags != 0) {
+                        g_propagate_error (error, inner_error);
+                        return;
+                }
+
+                g_warning ("Failed to update home: %s. Retrying offline.", inner_error->message);
+                g_clear_error (&inner_error);
+                flags |= HOMED_UPDATE_FLAGS_OFFLINE;
+        }
+}
+
+static void
+save_homed_extra_data (GDBusConnection *bus,
+                       User            *user,
+                       GError         **error)
+{
+        g_autoptr (GError) inner_error = NULL;
+        g_autoptr (json_object) record = NULL;
+        g_autoptr (GHashTable) blobs = NULL;
+
+        const char *user_name;
+
+        user_name = accounts_user_get_user_name (ACCOUNTS_USER (user));
+
+        record = user_prepare_update_json (bus, user_name, &inner_error);
+        if (record == NULL) {
+                g_set_error (error, ERROR, ERROR_FAILED,
+                             "Failed to prepare updated JSON record for %s: %s",
+                             user_name, inner_error->message);
+                return;
+        }
+
+        user_json_apply_extra_data (user, record);
+
+        blobs = user_prepare_blobs (user, &inner_error);
+        if (record == NULL) {
+                g_set_error (error, ERROR, ERROR_FAILED,
+                             "Failed to prepare updated blobs for %s: %s",
+                             user_name, inner_error->message);
+                return;
+        }
+
+        homed_update (bus, record, blobs, error);
 }
 
 static void
@@ -3153,6 +3415,8 @@ user_finalize (GObject *object)
         g_clear_pointer (&user->login_history, g_variant_unref);
         g_clear_pointer (&user->user_expiration_time, g_date_time_unref);
         g_clear_pointer (&user->last_change_time, g_date_time_unref);
+
+        g_free (user->blob_dir);
 
         if (G_OBJECT_CLASS (user_parent_class)->finalize)
                 (*G_OBJECT_CLASS (user_parent_class)->finalize) (object);
