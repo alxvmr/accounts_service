@@ -3144,6 +3144,151 @@ user_set_locked (AccountsUser          *auser,
         return TRUE;
 }
 
+static gboolean
+user_change_account_type_homed (GDBusMethodInvocation *context,
+                                User                  *user,
+                                AccountType            account_type)
+{
+        g_autoptr (GError) error = NULL;
+        g_autoptr (json_object) record = NULL;
+        g_autoptr (GHashTable) blobs = NULL;
+        g_auto (GStrv) extra_admin_groups = NULL;
+
+        json_object *member_of = NULL, *existing = NULL;
+
+        record = user_prepare_update_json (g_dbus_method_invocation_get_connection (context),
+                                           accounts_user_get_user_name (ACCOUNTS_USER (user)),
+                                           &error);
+        if (record == NULL) {
+                throw_error (context, ERROR_FAILED, "Failed to prepare JSON record for updating %s: %s",
+                             accounts_user_get_user_name (ACCOUNTS_USER (user)), error->message);
+                return FALSE;
+        }
+
+        extra_admin_groups = g_strsplit (EXTRA_ADMIN_GROUPS, ",", 0);
+
+        member_of = json_object_new_array_ext (g_strv_length (extra_admin_groups));
+
+        /* First we transfer over all existing non-admin groups */
+        if (json_object_object_get_ex (record, "memberOf", &existing)) {
+                g_assert (json_object_get_type (existing) == json_type_array);
+                for (guint i = 0; i < json_object_array_length (existing); i++) {
+                        const char *group = json_object_get_string (json_object_array_get_idx (existing, i));
+                        g_assert (group);
+
+                        if (g_str_equal (group, ADMIN_GROUP))
+                                continue;
+                        if (g_strv_contains ((const gchar * const *) extra_admin_groups, group))
+                                continue;
+
+                        json_object_array_add (member_of, json_object_new_string (group));
+                }
+        }
+
+        switch (account_type) {
+        case ACCOUNT_TYPE_ADMINISTRATOR:
+                json_object_array_add (member_of, json_object_new_string (ADMIN_GROUP));
+                for (gsize i = 0; extra_admin_groups[i] != NULL; i++) {
+                        json_object_array_add (member_of, json_object_new_string (extra_admin_groups[i]));
+                }
+                break;
+        case ACCOUNT_TYPE_STANDARD:
+        default:
+                break;
+        }
+
+        if (json_object_array_length (member_of) > 0)
+                json_object_object_add (record, "memberOf", member_of);
+        else
+                json_object_object_del (record, "memberOf");
+
+        blobs = user_prepare_blobs (user, &error);
+        if (record == NULL) {
+                throw_error (context, ERROR_FAILED, "Failed to prepare blobs for updating %s: %s",
+                             accounts_user_get_user_name (ACCOUNTS_USER (user)), error->message);
+                return FALSE;
+        }
+
+        homed_update (g_dbus_method_invocation_get_connection (context), record, blobs, &error);
+        if (error != NULL) {
+                throw_error (context, ERROR_FAILED, "Failed to update %s: %s",
+                             accounts_user_get_user_name (ACCOUNTS_USER (user)), error->message);
+                return FALSE;
+        }
+
+        return TRUE;
+}
+
+static gboolean
+user_change_account_type_shadow (GDBusMethodInvocation *context,
+                                 User                  *user,
+                                 AccountType            account_type)
+{
+        g_autoptr (GError) error = NULL;
+
+        gid_t *groups;
+        gint ngroups;
+
+        g_autoptr (GString) str = NULL;
+        g_autofree gid_t *extra_admin_groups_gids = NULL;
+        gsize n_extra_admin_groups_gids = 0;
+        gid_t admin_gid;
+        gint i;
+        const gchar *argv[6];
+
+        if (!get_admin_groups (&admin_gid, &extra_admin_groups_gids, &n_extra_admin_groups_gids)) {
+                throw_error (context, ERROR_FAILED, "failed to set account type: " ADMIN_GROUP " group not found");
+                return FALSE;
+        }
+
+        ngroups = get_user_groups (accounts_user_get_user_name (ACCOUNTS_USER (user)), user->gid, &groups);
+
+        str = g_string_new ("");
+        for (i = 0; i < ngroups; i++) {
+                gboolean group_is_admin = FALSE;
+
+                if (groups[i] == admin_gid)
+                        group_is_admin = TRUE;
+                for (gsize j = 0; j < n_extra_admin_groups_gids; j++) {
+                        if (groups[i] == extra_admin_groups_gids[j])
+                                group_is_admin = TRUE;
+                }
+
+                if (!group_is_admin)
+                        g_string_append_printf (str, "%d,", groups[i]);
+        }
+        switch (account_type) {
+        case ACCOUNT_TYPE_ADMINISTRATOR:
+                for (i = 0; i < n_extra_admin_groups_gids; i++) {
+                        g_string_append_printf (str, "%d,", extra_admin_groups_gids[i]);
+                }
+
+                g_string_append_printf (str, "%d", admin_gid);
+                break;
+        case ACCOUNT_TYPE_STANDARD:
+        default:
+                /* remove excess comma */
+                g_string_truncate (str, str->len - 1);
+                break;
+        }
+
+        g_free (groups);
+
+        argv[0] = "/usr/sbin/usermod";
+        argv[1] = "-G";
+        argv[2] = str->str;
+        argv[3] = "--";
+        argv[4] = accounts_user_get_user_name (ACCOUNTS_USER (user));
+        argv[5] = NULL;
+
+        if (!spawn_sync (argv, &error)) {
+                throw_error (context, ERROR_FAILED, "running '%s' failed: %s", argv[0], error->message);
+                return FALSE;
+        }
+
+        return TRUE;
+}
+
 static void
 user_change_account_type_authorized_cb (Daemon                *daemon,
                                         User                  *user,
@@ -3152,18 +3297,7 @@ user_change_account_type_authorized_cb (Daemon                *daemon,
 
 {
         AccountType account_type = GPOINTER_TO_INT (data);
-
-        g_autoptr (GError) error = NULL;
-        gid_t *groups;
-        gint ngroups;
-
-        g_autoptr (GString) str = NULL;
-        g_auto (GStrv) extra_admin_groups = NULL;
-        g_autofree gid_t *extra_admin_groups_gids = NULL;
-        gsize n_extra_admin_groups_gids = 0;
-        gid_t admin_gid;
-        gint i;
-        const gchar *argv[6];
+        gboolean ok;
 
         if (((AccountType) accounts_user_get_account_type (ACCOUNTS_USER (user))) != account_type) {
                 sys_log (context,
@@ -3172,60 +3306,16 @@ user_change_account_type_authorized_cb (Daemon                *daemon,
                          accounts_user_get_uid (ACCOUNTS_USER (user)),
                          account_type);
 
-                if (!get_admin_groups (&admin_gid, &extra_admin_groups_gids, &n_extra_admin_groups_gids)) {
-                        throw_error (context, ERROR_FAILED, "failed to set account type: " ADMIN_GROUP " group not found");
+                if (user->uses_homed)
+                        ok = user_change_account_type_homed (context, user, account_type);
+                else
+                        ok = user_change_account_type_shadow (context, user, account_type);
+                if (!ok)
                         return;
-                }
-
-                ngroups = get_user_groups (accounts_user_get_user_name (ACCOUNTS_USER (user)), user->gid, &groups);
-
-                str = g_string_new ("");
-                for (i = 0; i < ngroups; i++) {
-                        gboolean group_is_admin = FALSE;
-
-                        if (groups[i] == admin_gid)
-                                group_is_admin = TRUE;
-                        for (gsize j = 0; j < n_extra_admin_groups_gids; j++) {
-                                if (groups[i] == extra_admin_groups_gids[j])
-                                        group_is_admin = TRUE;
-                        }
-
-                        if (!group_is_admin)
-                                g_string_append_printf (str, "%d,", groups[i]);
-                }
-                switch (account_type) {
-                case ACCOUNT_TYPE_ADMINISTRATOR:
-                        for (i = 0; i < n_extra_admin_groups_gids; i++) {
-                                g_string_append_printf (str, "%d,", extra_admin_groups_gids[i]);
-                        }
-
-                        g_string_append_printf (str, "%d", admin_gid);
-                        break;
-                case ACCOUNT_TYPE_STANDARD:
-                default:
-                        /* remove excess comma */
-                        g_string_truncate (str, str->len - 1);
-                        break;
-                }
-
-                g_free (groups);
-
-                argv[0] = "/usr/sbin/usermod";
-                argv[1] = "-G";
-                argv[2] = str->str;
-                argv[3] = "--";
-                argv[4] = accounts_user_get_user_name (ACCOUNTS_USER (user));
-                argv[5] = NULL;
-
-                if (!spawn_sync (argv, &error)) {
-                        throw_error (context, ERROR_FAILED, "running '%s' failed: %s", argv[0], error->message);
-                        return;
-                }
 
                 accounts_user_set_account_type (ACCOUNTS_USER (user), account_type);
 
                 accounts_user_emit_changed (ACCOUNTS_USER (user));
-
                 g_object_notify (G_OBJECT (user), "account-type");
         }
 
@@ -3238,11 +3328,6 @@ user_set_account_type (AccountsUser          *auser,
                        gint                   account_type)
 {
         User *user = (User *) auser;
-
-        if (user->uses_homed) {
-                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
-                return TRUE;
-        }
 
         if (account_type < 0 || account_type > ACCOUNT_TYPE_LAST) {
                 throw_error (context, ERROR_FAILED, "unknown account type: %d", account_type);
