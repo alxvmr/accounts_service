@@ -3352,9 +3352,9 @@ user_change_password_mode_authorized_cb (Daemon                *daemon,
                                          gpointer               data)
 
 {
-        PasswordMode mode = GPOINTER_TO_INT (data);
-
         g_autoptr (GError) error = NULL;
+
+        PasswordMode mode = GPOINTER_TO_INT (data);
         const gchar *argv[6];
 
         if (((PasswordMode) accounts_user_get_password_mode (ACCOUNTS_USER (user))) != mode) {
@@ -3366,8 +3366,47 @@ user_change_password_mode_authorized_cb (Daemon                *daemon,
 
                 g_object_freeze_notify (G_OBJECT (user));
 
-                if (mode == PASSWORD_MODE_SET_AT_LOGIN ||
-                    mode == PASSWORD_MODE_NONE) {
+                if (user->uses_homed) {
+                        g_autoptr (json_object) record = NULL;
+                        g_autoptr (GHashTable) blobs = NULL;
+
+                        record = user_prepare_update_json (g_dbus_method_invocation_get_connection (context),
+                                                           accounts_user_get_user_name (ACCOUNTS_USER (user)),
+                                                           &error);
+                        if (record == NULL) {
+                                throw_error (context, ERROR_FAILED, "Failed to prepare JSON record for updating %s: %s",
+                                             accounts_user_get_user_name (ACCOUNTS_USER (user)), error->message);
+                                return;
+                        }
+
+                        if (mode == PASSWORD_MODE_SET_AT_LOGIN)
+                                json_object_object_add (record, "passwordChangeNow", json_object_new_boolean (TRUE));
+                        else
+                                json_object_object_del (record, "passwordChangeNow");
+
+                        /* Also unlock the account */
+                        json_object_object_del (record, "locked");
+
+                        if (mode != PASSWORD_MODE_REGULAR) {
+                                accounts_user_set_password_hint (ACCOUNTS_USER (user), NULL);
+                                user_json_apply_extra_data (user, record);
+                        }
+
+                        blobs = user_prepare_blobs (user, &error);
+                        if (record == NULL) {
+                                throw_error (context, ERROR_FAILED, "Failed to prepare blobs for updating %s: %s",
+                                             accounts_user_get_user_name (ACCOUNTS_USER (user)), error->message);
+                                return;
+                        }
+
+                        homed_update (g_dbus_method_invocation_get_connection (context), record, blobs, &error);
+                        if (error != NULL) {
+                                throw_error (context, ERROR_FAILED, "Failed to update %s: %s",
+                                             accounts_user_get_user_name (ACCOUNTS_USER (user)), error->message);
+                                return;
+                        }
+                } else if (mode == PASSWORD_MODE_SET_AT_LOGIN ||
+                           mode == PASSWORD_MODE_NONE) {
                         argv[0] = "/usr/bin/passwd";
                         argv[1] = "-d";
                         argv[2] = "--";
@@ -3394,6 +3433,7 @@ user_change_password_mode_authorized_cb (Daemon                *daemon,
                         }
 
                         accounts_user_set_password_hint (ACCOUNTS_USER (user), NULL);
+                        save_extra_data (user);
 
                         /* removing the password has the side-effect of
                          * unlocking the account
@@ -3416,8 +3456,6 @@ user_change_password_mode_authorized_cb (Daemon                *daemon,
 
                 accounts_user_set_password_mode (ACCOUNTS_USER (user), mode);
 
-                save_extra_data (user);
-
                 g_object_thaw_notify (G_OBJECT (user));
         }
 
@@ -3433,13 +3471,13 @@ user_set_password_mode (AccountsUser          *auser,
         const gchar *action_id;
         gint uid;
 
-        if (user->uses_homed) {
-                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
+        if (mode < 0 || mode > PASSWORD_MODE_LAST) {
+                throw_error (context, ERROR_FAILED, "unknown password mode: %d", mode);
                 return TRUE;
         }
 
-        if (mode < 0 || mode > PASSWORD_MODE_LAST) {
-                throw_error (context, ERROR_FAILED, "unknown password mode: %d", mode);
+        if (user->uses_homed && mode == PASSWORD_MODE_NONE) {
+                throw_error (context, ERROR_NOT_SUPPORTED, "PASSWORD_MODE_NONE is not supported by systemd-homed");
                 return TRUE;
         }
 
