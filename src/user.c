@@ -1931,10 +1931,22 @@ user_change_email_authorized_cb (Daemon                *daemon,
 {
         gchar *email = data;
 
+        if (*email == '\0')
+                email = NULL;
+
         if (g_strcmp0 (accounts_user_get_email (ACCOUNTS_USER (user)), email) != 0) {
                 accounts_user_set_email (ACCOUNTS_USER (user), email);
 
-                save_extra_data (user);
+                if (user->uses_homed) {
+                        g_autoptr (GError) inner_error = NULL;
+                        save_homed_extra_data (g_dbus_method_invocation_get_connection (context), user, &inner_error);
+                        if (inner_error != NULL) {
+                                throw_error (context, ERROR_FAILED, "Failed to change email: %s", inner_error->message);
+                                return;
+                        }
+                } else {
+                        save_extra_data (user);
+                }
         }
 
         accounts_user_complete_set_email (ACCOUNTS_USER (user), context);
@@ -1950,11 +1962,6 @@ user_set_email (AccountsUser          *auser,
         User *user = (User *) auser;
         int uid;
         const gchar *action_id;
-
-        if (user->uses_homed) {
-                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
-                return TRUE;
-        }
 
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
@@ -1987,22 +1994,36 @@ user_change_languages_authorized_cb (Daemon                *daemon,
         const gchar * const *languages = data;
         guint i;
 
-        for (i = 0; languages[i] != NULL; i++) {
-                if (!verify_locale (languages[i])) {
-                        g_dbus_method_invocation_return_error (context,
-                                                               G_DBUS_ERROR,
-                                                               G_DBUS_ERROR_INVALID_ARGS,
-                                                               "Locale '%s' is not a valid XPG-formatted locale",
-                                                               languages[i]);
-                        return;
-                }
-        }
-
         if (!g_strv_equal (accounts_user_get_languages (ACCOUNTS_USER (user)), languages)) {
-                accounts_user_set_language (ACCOUNTS_USER (user), languages[0]);
-                accounts_user_set_languages (ACCOUNTS_USER (user), languages);
+                if (*languages != NULL) {
+                        for (i = 0; languages[i] != NULL; i++) {
+                                if (!verify_locale (languages[i])) {
+                                        g_dbus_method_invocation_return_error (context,
+                                                                               G_DBUS_ERROR,
+                                                                               G_DBUS_ERROR_INVALID_ARGS,
+                                                                               "Locale '%s' is not a valid XPG-formatted locale",
+                                                                               languages[i]);
+                                        return;
+                                }
+                        }
 
-                save_extra_data (user);
+                        accounts_user_set_language (ACCOUNTS_USER (user), languages[0]);
+                        accounts_user_set_languages (ACCOUNTS_USER (user), languages);
+                } else {
+                        accounts_user_set_language (ACCOUNTS_USER (user), NULL);
+                        accounts_user_set_languages (ACCOUNTS_USER (user), NULL);
+                }
+
+                if (user->uses_homed) {
+                        g_autoptr (GError) inner_error = NULL;
+                        save_homed_extra_data (g_dbus_method_invocation_get_connection (context), user, &inner_error);
+                        if (inner_error != NULL) {
+                                throw_error (context, ERROR_FAILED, "Failed to change languages: %s", inner_error->message);
+                                return;
+                        }
+                } else {
+                        save_extra_data (user);
+                }
         }
 
         accounts_user_complete_set_languages (ACCOUNTS_USER (user), context);
@@ -2016,11 +2037,6 @@ user_set_languages (AccountsUser          *auser,
         User *user = (User *) auser;
         int uid;
         const gchar *action_id;
-
-        if (user->uses_homed) {
-                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
-                return TRUE;
-        }
 
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
@@ -2052,28 +2068,40 @@ user_change_language_authorized_cb (Daemon                *daemon,
 {
         gchar *language = data;
 
-        if (!verify_locale (language)) {
-                g_dbus_method_invocation_return_error (context,
-                                                       G_DBUS_ERROR,
-                                                       G_DBUS_ERROR_INVALID_ARGS,
-                                                       "Locale '%s' is not a valid XPG-formatted locale",
-                                                       language);
-                return;
-        }
-
         if (g_strcmp0 (accounts_user_get_language (ACCOUNTS_USER (user)), language) != 0) {
-                const gchar *languages[] = { language, NULL };
+                if (*language != '\0') {
+                        const gchar *languages[] = { language, NULL };
 
-                accounts_user_set_language (ACCOUNTS_USER (user), language);
-                accounts_user_set_languages (ACCOUNTS_USER (user), languages);
+                        if (!verify_locale (language)) {
+                                g_dbus_method_invocation_return_error (context,
+                                                                       G_DBUS_ERROR,
+                                                                       G_DBUS_ERROR_INVALID_ARGS,
+                                                                       "Locale '%s' is not a valid XPG-formatted locale",
+                                                                       language);
+                                return;
+                        }
 
-                save_extra_data (user);
+                        accounts_user_set_language (ACCOUNTS_USER (user), language);
+                        accounts_user_set_languages (ACCOUNTS_USER (user), languages);
+                } else {
+                        accounts_user_set_language (ACCOUNTS_USER (user), NULL);
+                        accounts_user_set_languages (ACCOUNTS_USER (user), NULL);
+                }
+
+                if (user->uses_homed) {
+                        g_autoptr (GError) inner_error = NULL;
+                        save_homed_extra_data (g_dbus_method_invocation_get_connection (context), user, &inner_error);
+                        if (inner_error != NULL) {
+                                throw_error (context, ERROR_FAILED, "Failed to change language: %s", inner_error->message);
+                                return;
+                        }
+                } else {
+                        save_extra_data (user);
+                }
         }
 
         accounts_user_complete_set_language (ACCOUNTS_USER (user), context);
 }
-
-
 
 static gboolean
 user_set_language (AccountsUser          *auser,
@@ -2083,11 +2111,6 @@ user_set_language (AccountsUser          *auser,
         User *user = (User *) auser;
         int uid;
         const gchar *action_id;
-
-        if (user->uses_homed) {
-                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
-                return TRUE;
-        }
 
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
@@ -2119,10 +2142,22 @@ user_change_session_authorized_cb (Daemon                *daemon,
 {
         const gchar *session = user_data;
 
+        if (*session == '\0')
+                session = NULL;
+
         if (g_strcmp0 (accounts_user_get_session (ACCOUNTS_USER (user)), session) != 0) {
                 accounts_user_set_session (ACCOUNTS_USER (user), session);
 
-                save_extra_data (user);
+                if (user->uses_homed) {
+                        g_autoptr (GError) inner_error = NULL;
+                        save_homed_extra_data (g_dbus_method_invocation_get_connection (context), user, &inner_error);
+                        if (inner_error != NULL) {
+                                throw_error (context, ERROR_FAILED, "Failed to change session: %s", inner_error->message);
+                                return;
+                        }
+                } else {
+                        save_extra_data (user);
+                }
         }
 
         accounts_user_complete_set_session (ACCOUNTS_USER (user), context);
@@ -2136,11 +2171,6 @@ user_set_session (AccountsUser          *auser,
         User *user = (User *) auser;
         int uid;
         const gchar *action_id;
-
-        if (user->uses_homed) {
-                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
-                return TRUE;
-        }
 
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
@@ -2172,10 +2202,22 @@ user_change_session_type_authorized_cb (Daemon                *daemon,
 {
         const gchar *session_type = user_data;
 
+        if (*session_type == '\0')
+                session_type = NULL;
+
         if (g_strcmp0 (accounts_user_get_session_type (ACCOUNTS_USER (user)), session_type) != 0) {
                 accounts_user_set_session_type (ACCOUNTS_USER (user), session_type);
 
-                save_extra_data (user);
+                if (user->uses_homed) {
+                        g_autoptr (GError) inner_error = NULL;
+                        save_homed_extra_data (g_dbus_method_invocation_get_connection (context), user, &inner_error);
+                        if (inner_error != NULL) {
+                                throw_error (context, ERROR_FAILED, "Failed to change session type: %s", inner_error->message);
+                                return;
+                        }
+                } else {
+                        save_extra_data (user);
+                }
         }
 
         accounts_user_complete_set_session_type (ACCOUNTS_USER (user), context);
@@ -2189,11 +2231,6 @@ user_set_session_type (AccountsUser          *auser,
         User *user = (User *) auser;
         int uid;
         const gchar *action_id;
-
-        if (user->uses_homed) {
-                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
-                return TRUE;
-        }
 
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
@@ -2225,10 +2262,22 @@ user_change_x_session_authorized_cb (Daemon                *daemon,
 {
         gchar *x_session = data;
 
+        if (*x_session == '\0')
+                x_session = NULL;
+
         if (g_strcmp0 (accounts_user_get_xsession (ACCOUNTS_USER (user)), x_session) != 0) {
                 accounts_user_set_xsession (ACCOUNTS_USER (user), x_session);
 
-                save_extra_data (user);
+                if (user->uses_homed) {
+                        g_autoptr (GError) inner_error = NULL;
+                        save_homed_extra_data (g_dbus_method_invocation_get_connection (context), user, &inner_error);
+                        if (inner_error != NULL) {
+                                throw_error (context, ERROR_FAILED, "Failed to change xsession: %s", inner_error->message);
+                                return;
+                        }
+                } else {
+                        save_extra_data (user);
+                }
         }
 
         accounts_user_complete_set_xsession (ACCOUNTS_USER (user), context);
@@ -2242,11 +2291,6 @@ user_set_x_session (AccountsUser          *auser,
         User *user = (User *) auser;
         int uid;
         const gchar *action_id;
-
-        if (user->uses_homed) {
-                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
-                return TRUE;
-        }
 
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
@@ -2520,10 +2564,22 @@ user_change_location_authorized_cb (Daemon                *daemon,
 {
         gchar *location = data;
 
+        if (*location == '\0')
+                location = NULL;
+
         if (g_strcmp0 (accounts_user_get_location (ACCOUNTS_USER (user)), location) != 0) {
                 accounts_user_set_location (ACCOUNTS_USER (user), location);
 
-                save_extra_data (user);
+                if (user->uses_homed) {
+                        g_autoptr (GError) inner_error = NULL;
+                        save_homed_extra_data (g_dbus_method_invocation_get_connection (context), user, &inner_error);
+                        if (inner_error != NULL) {
+                                throw_error (context, ERROR_FAILED, "Failed to change location: %s", inner_error->message);
+                                return;
+                        }
+                } else {
+                        save_extra_data (user);
+                }
         }
 
         accounts_user_complete_set_location (ACCOUNTS_USER (user), context);
@@ -2537,11 +2593,6 @@ user_set_location (AccountsUser          *auser,
         User *user = (User *) auser;
         int uid;
         const gchar *action_id;
-
-        if (user->uses_homed) {
-                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
-                return TRUE;
-        }
 
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
@@ -3292,6 +3343,9 @@ user_change_password_hint_authorized_cb (Daemon                *daemon,
 {
         gchar *hint = data;
 
+        if (*hint == '\0')
+                hint = NULL;
+
         sys_log (context,
                  "set password hint of user '%s' (%" G_GUINT64_FORMAT ")'",
                  accounts_user_get_user_name (ACCOUNTS_USER (user)),
@@ -3300,7 +3354,16 @@ user_change_password_hint_authorized_cb (Daemon                *daemon,
         if (g_strcmp0 (accounts_user_get_password_hint (ACCOUNTS_USER (user)), hint) != 0) {
                 accounts_user_set_password_hint (ACCOUNTS_USER (user), hint);
 
-                save_extra_data (user);
+                if (user->uses_homed) {
+                        g_autoptr (GError) inner_error = NULL;
+                        save_homed_extra_data (g_dbus_method_invocation_get_connection (context), user, &inner_error);
+                        if (inner_error != NULL) {
+                                throw_error (context, ERROR_FAILED, "Failed to change password hint: %s", inner_error->message);
+                                return;
+                        }
+                } else {
+                        save_extra_data (user);
+                }
         }
 
         accounts_user_complete_set_password_hint (ACCOUNTS_USER (user), context);
@@ -3314,11 +3377,6 @@ user_set_password_hint (AccountsUser          *auser,
         User *user = (User *) auser;
         int uid;
         const gchar *action_id;
-
-        if (user->uses_homed) {
-                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
-                return TRUE;
-        }
 
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
