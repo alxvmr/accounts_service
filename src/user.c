@@ -2565,11 +2565,9 @@ user_set_user_expiration_policy_authorized_cb (Daemon                *daemon,
                                                gpointer               data)
 
 {
-        g_autofree gchar *expiration_time = NULL;
-
         g_autoptr (GError) error = NULL;
-        g_autoptr (GDateTime) time = NULL;
-        const gchar *argv[5];
+
+        gint64 timestamp = (gint64) data;
 
         sys_log (context,
                  "set user expiration policy of user '%s' (%" G_GUINT64_FORMAT ")",
@@ -2578,21 +2576,61 @@ user_set_user_expiration_policy_authorized_cb (Daemon                *daemon,
 
         g_object_freeze_notify (G_OBJECT (user));
 
-        if ((gint64) data != -1) {
-                time = g_date_time_new_from_unix_local ((gint64) data);
-                expiration_time = g_date_time_format (time, "%F");
-        } else {
-                expiration_time = g_strdup ("-1");
-        }
-        argv[0] = "/usr/bin/chage";
-        argv[1] = "-E";
-        argv[2] = expiration_time;
-        argv[3] = accounts_user_get_user_name (ACCOUNTS_USER (user));
-        argv[4] = NULL;
+        if (user->uses_homed) {
+                g_autoptr (json_object) record = NULL;
+                g_autoptr (GHashTable) blobs = NULL;
 
-        if (!spawn_sync (argv, &error)) {
-                throw_error (context, ERROR_FAILED, "running '%s' failed: %s", argv[0], error->message);
-                return;
+                record = user_prepare_update_json (g_dbus_method_invocation_get_connection (context),
+                                                   accounts_user_get_user_name (ACCOUNTS_USER (user)),
+                                                   &error);
+                if (record == NULL) {
+                        throw_error (context, ERROR_FAILED, "Failed to prepare JSON record for updating %s: %s",
+                                     accounts_user_get_user_name (ACCOUNTS_USER (user)), error->message);
+                        return;
+                }
+
+                if (timestamp > 0) {
+                        guint64 val = ((guint64) timestamp) * G_TIME_SPAN_SECOND;
+                        json_object_object_add (record, "notAfterUSec", json_object_new_uint64 (val));
+                } else {
+                        json_object_object_del (record, "notAfterUSec");
+                }
+
+                blobs = user_prepare_blobs (user, &error);
+                if (record == NULL) {
+                        throw_error (context, ERROR_FAILED, "Failed to prepare blobs for updating %s: %s",
+                                     accounts_user_get_user_name (ACCOUNTS_USER (user)), error->message);
+                        return;
+                }
+
+                homed_update (g_dbus_method_invocation_get_connection (context), record, blobs, &error);
+                if (error != NULL) {
+                        throw_error (context, ERROR_FAILED, "Failed to update %s: %s",
+                                     accounts_user_get_user_name (ACCOUNTS_USER (user)), error->message);
+                        return;
+                }
+        } else {
+                g_autoptr (GDateTime) time = NULL;
+                g_autofree gchar *expiration_time = NULL;
+                const gchar *argv[5];
+
+                if (timestamp > 0) {
+                        time = g_date_time_new_from_unix_local (timestamp);
+                        expiration_time = g_date_time_format (time, "%F");
+                } else {
+                        expiration_time = g_strdup ("-1");
+                }
+
+                argv[0] = "/usr/bin/chage";
+                argv[1] = "-E";
+                argv[2] = expiration_time;
+                argv[3] = accounts_user_get_user_name (ACCOUNTS_USER (user));
+                argv[4] = NULL;
+
+                if (!spawn_sync (argv, &error)) {
+                        throw_error (context, ERROR_FAILED, "running '%s' failed: %s", argv[0], error->message);
+                        return;
+                }
         }
 
         g_object_thaw_notify (G_OBJECT (user));
@@ -2608,11 +2646,6 @@ user_set_user_expiration_policy (AccountsUser          *auser,
         User *user = (User *) auser;
         int uid;
         const gchar *action_id;
-
-        if (user->uses_homed) {
-                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
-                return TRUE;
-        }
 
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
