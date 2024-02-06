@@ -2407,21 +2407,11 @@ user_get_password_expiration_policy (AccountsUser          *auser,
 
 typedef struct PasswordExpirationPolicy
 {
-        char *min_days_between_changes;
-        char *max_days_between_changes;
-        char *days_to_warn;
-        char *days_after_expiration_until_lock;
+        gint64 min_days_between_changes;
+        gint64 max_days_between_changes;
+        gint64 days_to_warn;
+        gint64 days_after_expiration_until_lock;
 } PasswordExpirationPolicy;
-
-static void
-free_password_expiration (PasswordExpirationPolicy *pwd_expiration)
-{
-        g_free (pwd_expiration->min_days_between_changes);
-        g_free (pwd_expiration->max_days_between_changes);
-        g_free (pwd_expiration->days_to_warn);
-        g_free (pwd_expiration->days_after_expiration_until_lock);
-        g_free (pwd_expiration);
-}
 
 static void
 user_set_password_expiration_policy_authorized_cb (Daemon                *daemon,
@@ -2430,10 +2420,9 @@ user_set_password_expiration_policy_authorized_cb (Daemon                *daemon
                                                    gpointer               data)
 
 {
-        PasswordExpirationPolicy *pwd_expiration = data;
-
         g_autoptr (GError) error = NULL;
-        const gchar *argv[11];
+
+        PasswordExpirationPolicy *pwd_expiration = data;
 
         sys_log (context,
                  "set password expiration policy of user '%s' (%" G_GUINT64_FORMAT ")",
@@ -2441,21 +2430,87 @@ user_set_password_expiration_policy_authorized_cb (Daemon                *daemon
                  accounts_user_get_uid (ACCOUNTS_USER (user)));
 
         g_object_freeze_notify (G_OBJECT (user));
-        argv[0] = "/usr/bin/chage";
-        argv[1] = "-m";
-        argv[2] = pwd_expiration->min_days_between_changes;
-        argv[3] = "-M";
-        argv[4] = pwd_expiration->max_days_between_changes;
-        argv[5] = "-W";
-        argv[6] = pwd_expiration->days_to_warn;
-        argv[7] = "-I";
-        argv[8] = pwd_expiration->days_after_expiration_until_lock;
-        argv[9] = accounts_user_get_user_name (ACCOUNTS_USER (user));
-        argv[10] = NULL;
 
-        if (!spawn_sync (argv, &error)) {
-                throw_error (context, ERROR_FAILED, "running '%s' failed: %s", argv[0], error->message);
-                return;
+        if (user->uses_homed) {
+                g_autoptr (json_object) record = NULL;
+                g_autoptr (GHashTable) blobs = NULL;
+
+                record = user_prepare_update_json (g_dbus_method_invocation_get_connection (context),
+                                                   accounts_user_get_user_name (ACCOUNTS_USER (user)),
+                                                   &error);
+                if (record == NULL) {
+                        throw_error (context, ERROR_FAILED, "Failed to prepare JSON record for updating %s: %s",
+                                     accounts_user_get_user_name (ACCOUNTS_USER (user)), error->message);
+                        return;
+                }
+
+                if (pwd_expiration->min_days_between_changes < 0) {
+                        json_object_object_del (record, "passwordChangeMinUSec");
+                } else {
+                        guint64 val = ((guint64) pwd_expiration->min_days_between_changes) * G_TIME_SPAN_DAY;
+                        json_object_object_add (record, "passwordChangeMinUSec", json_object_new_uint64 (val));
+                }
+
+                if (pwd_expiration->max_days_between_changes < 0) {
+                        json_object_object_del (record, "passwordChangeMaxUSec");
+                } else {
+                        guint64 val = ((guint64) pwd_expiration->max_days_between_changes) * G_TIME_SPAN_DAY;
+                        json_object_object_add (record, "passwordChangeMaxUSec", json_object_new_uint64 (val));
+                }
+
+                if (pwd_expiration->days_to_warn < 0) {
+                        json_object_object_del (record, "passwordChangeWarnUSec");
+                } else {
+                        guint64 val = ((guint64) pwd_expiration->days_to_warn) * G_TIME_SPAN_DAY;
+                        json_object_object_add (record, "passwordChangeWarnUSec", json_object_new_uint64 (val));
+                }
+
+                if (pwd_expiration->days_after_expiration_until_lock < 0) {
+                        json_object_object_del (record, "passwordChangeInactiveUSec");
+                } else {
+                        guint64 val = ((guint64) pwd_expiration->days_after_expiration_until_lock) * G_TIME_SPAN_DAY;
+                        json_object_object_add (record, "passwordChangeInactiveUSec", json_object_new_uint64 (val));
+                }
+
+                blobs = user_prepare_blobs (user, &error);
+                if (record == NULL) {
+                        throw_error (context, ERROR_FAILED, "Failed to prepare blobs for updating %s: %s",
+                                     accounts_user_get_user_name (ACCOUNTS_USER (user)), error->message);
+                        return;
+                }
+
+                homed_update (g_dbus_method_invocation_get_connection (context), record, blobs, &error);
+                if (error != NULL) {
+                        throw_error (context, ERROR_FAILED, "Failed to update %s: %s",
+                                     accounts_user_get_user_name (ACCOUNTS_USER (user)), error->message);
+                        return;
+                }
+        } else {
+                g_autofree gchar *min_days_bt_changes = NULL, *max_days_bt_changes = NULL,
+                                 *days_to_warn = NULL, *days_after_exp_until_lock = NULL;
+                const gchar *argv[11];
+
+                min_days_bt_changes = g_strdup_printf ("%ld", pwd_expiration->min_days_between_changes);
+                max_days_bt_changes = g_strdup_printf ("%ld", pwd_expiration->max_days_between_changes);
+                days_to_warn = g_strdup_printf ("%ld", pwd_expiration->days_to_warn);
+                days_after_exp_until_lock = g_strdup_printf ("%ld", pwd_expiration->days_after_expiration_until_lock);
+
+                argv[0] = "/usr/bin/chage";
+                argv[1] = "-m";
+                argv[2] = min_days_bt_changes;
+                argv[3] = "-M";
+                argv[4] = max_days_bt_changes;
+                argv[5] = "-W";
+                argv[6] = days_to_warn;
+                argv[7] = "-I";
+                argv[8] = days_after_exp_until_lock;
+                argv[9] = accounts_user_get_user_name (ACCOUNTS_USER (user));
+                argv[10] = NULL;
+
+                if (!spawn_sync (argv, &error)) {
+                        throw_error (context, ERROR_FAILED, "running '%s' failed: %s", argv[0], error->message);
+                        return;
+                }
         }
 
         g_object_thaw_notify (G_OBJECT (user));
@@ -2476,11 +2531,6 @@ user_set_password_expiration_policy (AccountsUser          *auser,
         const gchar *action_id;
         PasswordExpirationPolicy *pwd_expiration = NULL;
 
-        if (user->uses_homed) {
-                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
-                return TRUE;
-        }
-
         if (!get_caller_uid (context, &uid)) {
                 throw_error (context, ERROR_FAILED, "identifying caller failed");
                 return TRUE;
@@ -2492,10 +2542,10 @@ user_set_password_expiration_policy (AccountsUser          *auser,
                 action_id = "org.freedesktop.accounts.user-administration";
 
         pwd_expiration = g_new (PasswordExpirationPolicy, 1);
-        pwd_expiration->min_days_between_changes = g_strdup_printf ("%ld", min_days_between_changes);
-        pwd_expiration->max_days_between_changes = g_strdup_printf ("%ld", max_days_between_changes);
-        pwd_expiration->days_to_warn = g_strdup_printf ("%ld", days_to_warn);
-        pwd_expiration->days_after_expiration_until_lock = g_strdup_printf ("%ld", days_after_expiration_until_lock);
+        pwd_expiration->min_days_between_changes = min_days_between_changes;
+        pwd_expiration->max_days_between_changes = max_days_between_changes;
+        pwd_expiration->days_to_warn = days_to_warn;
+        pwd_expiration->days_after_expiration_until_lock = days_after_expiration_until_lock;
 
         daemon_local_check_auth (user->daemon,
                                  user,
@@ -2503,7 +2553,7 @@ user_set_password_expiration_policy (AccountsUser          *auser,
                                  user_set_password_expiration_policy_authorized_cb,
                                  context,
                                  pwd_expiration,
-                                 (GDestroyNotify) free_password_expiration);
+                                 g_free);
 
         return TRUE;
 }
