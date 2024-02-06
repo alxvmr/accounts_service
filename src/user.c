@@ -2715,10 +2715,9 @@ user_change_shell_authorized_cb (Daemon                *daemon,
                                  gpointer               data)
 
 {
-        gchar *shell = data;
-
         g_autoptr (GError) error = NULL;
-        const gchar *argv[6];
+
+        gchar *shell = data;
 
         if (g_strcmp0 (accounts_user_get_shell (ACCOUNTS_USER (user)), shell) != 0) {
                 sys_log (context,
@@ -2727,16 +2726,51 @@ user_change_shell_authorized_cb (Daemon                *daemon,
                          accounts_user_get_uid (ACCOUNTS_USER (user)),
                          shell);
 
-                argv[0] = "/usr/sbin/usermod";
-                argv[1] = "-s";
-                argv[2] = shell;
-                argv[3] = "--";
-                argv[4] = accounts_user_get_user_name (ACCOUNTS_USER (user));
-                argv[5] = NULL;
+                if (user->uses_homed) {
+                        g_autoptr (json_object) record = NULL;
+                        g_autoptr (GHashTable) blobs = NULL;
 
-                if (!spawn_sync (argv, &error)) {
-                        throw_error (context, ERROR_FAILED, "running '%s' failed: %s", argv[0], error->message);
-                        return;
+                        record = user_prepare_update_json (g_dbus_method_invocation_get_connection (context),
+                                                           accounts_user_get_user_name (ACCOUNTS_USER (user)),
+                                                           &error);
+                        if (record == NULL) {
+                                throw_error (context, ERROR_FAILED, "Failed to prepare JSON record for updating %s: %s",
+                                             accounts_user_get_user_name (ACCOUNTS_USER (user)), error->message);
+                                return;
+                        }
+
+                        if (shell != NULL && *shell != '\0')
+                                json_object_object_add (record, "shell", json_object_new_string (shell));
+                        else
+                                json_object_object_del (record, "shell");
+
+                        blobs = user_prepare_blobs (user, &error);
+                        if (record == NULL) {
+                                throw_error (context, ERROR_FAILED, "Failed to prepare blobs for updating %s: %s",
+                                             accounts_user_get_user_name (ACCOUNTS_USER (user)), error->message);
+                                return;
+                        }
+
+                        homed_update (g_dbus_method_invocation_get_connection (context), record, blobs, &error);
+                        if (error != NULL) {
+                                throw_error (context, ERROR_FAILED, "Failed to update %s: %s",
+                                             accounts_user_get_user_name (ACCOUNTS_USER (user)), error->message);
+                                return;
+                        }
+                } else {
+                        const gchar *argv[6];
+
+                        argv[0] = "/usr/sbin/usermod";
+                        argv[1] = "-s";
+                        argv[2] = shell;
+                        argv[3] = "--";
+                        argv[4] = accounts_user_get_user_name (ACCOUNTS_USER (user));
+                        argv[5] = NULL;
+
+                        if (!spawn_sync (argv, &error)) {
+                                throw_error (context, ERROR_FAILED, "running '%s' failed: %s", argv[0], error->message);
+                                return;
+                        }
                 }
 
                 accounts_user_set_shell (ACCOUNTS_USER (user), shell);
@@ -2751,11 +2785,6 @@ user_set_shell (AccountsUser          *auser,
                 const gchar           *shell)
 {
         User *user = (User *) auser;
-
-        if (user->uses_homed) {
-                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
-                return TRUE;
-        }
 
         daemon_local_check_auth (user->daemon,
                                  user,
