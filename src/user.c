@@ -3037,10 +3037,9 @@ user_change_locked_authorized_cb (Daemon                *daemon,
                                   gpointer               data)
 
 {
-        gboolean locked = GPOINTER_TO_INT (data);
-
         g_autoptr (GError) error = NULL;
-        const gchar *argv[5];
+
+        gboolean locked = GPOINTER_TO_INT (data);
 
         if (accounts_user_get_locked (ACCOUNTS_USER (user)) != locked) {
                 sys_log (context,
@@ -3048,15 +3047,51 @@ user_change_locked_authorized_cb (Daemon                *daemon,
                          locked ? "locking" : "unlocking",
                          accounts_user_get_user_name (ACCOUNTS_USER (user)),
                          accounts_user_get_uid (ACCOUNTS_USER (user)));
-                argv[0] = "/usr/sbin/usermod";
-                argv[1] = locked ? "-L" : "-U";
-                argv[2] = "--";
-                argv[3] = accounts_user_get_user_name (ACCOUNTS_USER (user));
-                argv[4] = NULL;
 
-                if (!spawn_sync (argv, &error)) {
-                        throw_error (context, ERROR_FAILED, "running '%s' failed: %s", argv[0], error->message);
-                        return;
+             if (user->uses_homed) {
+                        g_autoptr (json_object) record = NULL;
+                        g_autoptr (GHashTable) blobs = NULL;
+
+                        record = user_prepare_update_json (g_dbus_method_invocation_get_connection (context),
+                                                           accounts_user_get_user_name (ACCOUNTS_USER (user)),
+                                                           &error);
+                        if (record == NULL) {
+                                throw_error (context, ERROR_FAILED, "Failed to prepare JSON record for updating %s: %s",
+                                             accounts_user_get_user_name (ACCOUNTS_USER (user)), error->message);
+                                return;
+                        }
+
+                        if (locked)
+                                json_object_object_add (record, "locked", json_object_new_boolean (TRUE));
+                        else
+                                json_object_object_del (record, "locked");
+
+                        blobs = user_prepare_blobs (user, &error);
+                        if (record == NULL) {
+                                throw_error (context, ERROR_FAILED, "Failed to prepare blobs for updating %s: %s",
+                                             accounts_user_get_user_name (ACCOUNTS_USER (user)), error->message);
+                                return;
+                        }
+
+                        homed_update (g_dbus_method_invocation_get_connection (context), record, blobs, &error);
+                        if (error != NULL) {
+                                throw_error (context, ERROR_FAILED, "Failed to update %s: %s",
+                                             accounts_user_get_user_name (ACCOUNTS_USER (user)), error->message);
+                                return;
+                        }
+                } else {
+                        const gchar *argv[5];
+
+                        argv[0] = "/usr/sbin/usermod";
+                        argv[1] = locked ? "-L" : "-U";
+                        argv[2] = "--";
+                        argv[3] = accounts_user_get_user_name (ACCOUNTS_USER (user));
+                        argv[4] = NULL;
+
+                        if (!spawn_sync (argv, &error)) {
+                                throw_error (context, ERROR_FAILED, "running '%s' failed: %s", argv[0], error->message);
+                                return;
+                        }
                 }
 
                 accounts_user_set_locked (ACCOUNTS_USER (user), locked);
@@ -3097,11 +3132,6 @@ user_set_locked (AccountsUser          *auser,
                  gboolean               locked)
 {
         User *user = (User *) auser;
-
-        if (user->uses_homed) {
-                throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
-                return TRUE;
-        }
 
         daemon_local_check_auth (user->daemon,
                                  user,
