@@ -982,6 +982,25 @@ act_user_is_local_account (ActUser *user)
 }
 
 /**
+ * act_user_uses_homed:
+ * @user: the user object to examine.
+ *
+ * Retrieves whether the user is a backed by systemd-homed or not.
+ *
+ * Returns: %TRUE if the user is backed by systemd-homed
+ **/
+gboolean
+act_user_uses_homed (ActUser *user)
+{
+        g_return_val_if_fail (ACT_IS_USER (user), FALSE);
+
+        if (user->accounts_proxy == NULL)
+                return FALSE;
+
+        return accounts_user_get_uses_homed (user->accounts_proxy);
+}
+
+/**
  * act_user_is_nonexistent:
  * @user: the user object to examine.
  *

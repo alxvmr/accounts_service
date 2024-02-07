@@ -989,6 +989,16 @@
     </doc:doc>
   </property>
 
+  <property name="UsesHomed" type="b" access="read">
+    <doc:doc>
+      <doc:description>
+        <doc:para>
+          Whether the user is backed by systemd-homed or not.
+        </doc:para>
+      </doc:description>
+    </doc:doc>
+  </property>
+
   <signal name="Changed">
     <doc:doc>
       <doc:description>

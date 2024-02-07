@@ -83,7 +83,6 @@ struct User
 
         GHashTable          *extensions;  /* (owned) (element-type utf8 GDBusInterfaceInfo) */
 
-        gboolean             uses_homed;
         gchar               *blob_dir;
         json_object         *json_extension;
 
@@ -425,6 +424,8 @@ user_update_from_pwent (User          *user,
 
         g_object_freeze_notify (G_OBJECT (user));
 
+        accounts_user_set_uses_homed (ACCOUNTS_USER (user), FALSE);
+
         g_clear_pointer (&user->gecos, g_free);
         if (pwent->pw_gecos && pwent->pw_gecos[0] != '\0') {
                 gchar *first_comma = NULL;
@@ -746,7 +747,8 @@ user_update_from_json (User       *user,
         g_assert (json_object_get_type (root) == json_type_object);
 
         g_object_freeze_notify (G_OBJECT (user));
-        user->uses_homed = TRUE;
+
+        accounts_user_set_uses_homed (ACCOUNTS_USER (user), TRUE);
 
         accounts_user_set_password_mode (ACCOUNTS_USER (user), PASSWORD_MODE_REGULAR);
         user->user_expiration_time = NULL;
@@ -939,7 +941,7 @@ user_update_from_cache (User *user)
 
         g_autoptr (GKeyFile) key_file = NULL;
 
-        if (user->uses_homed)
+        if (user_get_uses_homed (user))
                 return; /* homed is the one and only source of truth for the users it manages. */
 
         filename = g_build_filename (get_userdir (), accounts_user_get_user_name (ACCOUNTS_USER (user)), NULL);
@@ -1326,7 +1328,7 @@ user_extension_get_printed (User       *user,
 {
         json_object *iface, *prop;
 
-        if (!user->uses_homed)
+        if (!user_get_uses_homed (user))
                 return g_key_file_get_value (user->keyfile, iface_name, prop_name, NULL);
 
         if (!json_object_object_get_ex (user->json_extension, iface_name, &iface))
@@ -1438,7 +1440,7 @@ user_extension_set_printed (GDBusConnection *bus,
 {
         json_object *iface = NULL;
 
-        if (!user->uses_homed) {
+        if (!user_get_uses_homed (user)) {
                 g_key_file_set_value (user->keyfile, iface_name, prop_name, printed);
                 save_extra_data (user);
                 return;
@@ -1553,7 +1555,7 @@ user_extension_authentication_done (Daemon                *daemon,
         GDBusInterfaceInfo *interface = user_data;
         const gchar *method_name;
 
-        if (!user_has_cache_file (user) && !user->uses_homed)
+        if (!user_has_cache_file (user) && !user_get_uses_homed (user))
                 user_update_from_template (user);
 
         method_name = g_dbus_method_invocation_get_method_name (invocation);
@@ -1841,7 +1843,7 @@ user_get_shell (User *user)
 gboolean
 user_get_uses_homed (User *user)
 {
-        return user->uses_homed;
+        return accounts_user_get_uses_homed (ACCOUNTS_USER (user));
 }
 
 gboolean
@@ -1882,7 +1884,7 @@ user_change_real_name_authorized_cb (Daemon                *daemon,
                          accounts_user_get_uid (ACCOUNTS_USER (user)),
                          name);
 
-                if (user->uses_homed) {
+                if (user_get_uses_homed (user)) {
                         g_autoptr (json_object) record = NULL;
                         g_autoptr (GHashTable) blobs = NULL;
 
@@ -2034,7 +2036,7 @@ user_set_user_name (AccountsUser          *auser,
 {
         User *user = (User *) auser;
 
-        if (user->uses_homed) {
+        if (user_get_uses_homed (user)) {
                 throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user name for user managed by systemd-homed");
                 return TRUE;
         }
@@ -2065,7 +2067,7 @@ user_change_email_authorized_cb (Daemon                *daemon,
         if (g_strcmp0 (accounts_user_get_email (ACCOUNTS_USER (user)), email) != 0) {
                 accounts_user_set_email (ACCOUNTS_USER (user), email);
 
-                if (user->uses_homed) {
+                if (user_get_uses_homed (user)) {
                         g_autoptr (GError) inner_error = NULL;
                         save_homed_extra_data (g_dbus_method_invocation_get_connection (context), user, &inner_error);
                         if (inner_error != NULL) {
@@ -2142,7 +2144,7 @@ user_change_languages_authorized_cb (Daemon                *daemon,
                         accounts_user_set_languages (ACCOUNTS_USER (user), NULL);
                 }
 
-                if (user->uses_homed) {
+                if (user_get_uses_homed (user)) {
                         g_autoptr (GError) inner_error = NULL;
                         save_homed_extra_data (g_dbus_method_invocation_get_connection (context), user, &inner_error);
                         if (inner_error != NULL) {
@@ -2216,7 +2218,7 @@ user_change_language_authorized_cb (Daemon                *daemon,
                         accounts_user_set_languages (ACCOUNTS_USER (user), NULL);
                 }
 
-                if (user->uses_homed) {
+                if (user_get_uses_homed (user)) {
                         g_autoptr (GError) inner_error = NULL;
                         save_homed_extra_data (g_dbus_method_invocation_get_connection (context), user, &inner_error);
                         if (inner_error != NULL) {
@@ -2276,7 +2278,7 @@ user_change_session_authorized_cb (Daemon                *daemon,
         if (g_strcmp0 (accounts_user_get_session (ACCOUNTS_USER (user)), session) != 0) {
                 accounts_user_set_session (ACCOUNTS_USER (user), session);
 
-                if (user->uses_homed) {
+                if (user_get_uses_homed (user)) {
                         g_autoptr (GError) inner_error = NULL;
                         save_homed_extra_data (g_dbus_method_invocation_get_connection (context), user, &inner_error);
                         if (inner_error != NULL) {
@@ -2336,7 +2338,7 @@ user_change_session_type_authorized_cb (Daemon                *daemon,
         if (g_strcmp0 (accounts_user_get_session_type (ACCOUNTS_USER (user)), session_type) != 0) {
                 accounts_user_set_session_type (ACCOUNTS_USER (user), session_type);
 
-                if (user->uses_homed) {
+                if (user_get_uses_homed (user)) {
                         g_autoptr (GError) inner_error = NULL;
                         save_homed_extra_data (g_dbus_method_invocation_get_connection (context), user, &inner_error);
                         if (inner_error != NULL) {
@@ -2396,7 +2398,7 @@ user_change_x_session_authorized_cb (Daemon                *daemon,
         if (g_strcmp0 (accounts_user_get_xsession (ACCOUNTS_USER (user)), x_session) != 0) {
                 accounts_user_set_xsession (ACCOUNTS_USER (user), x_session);
 
-                if (user->uses_homed) {
+                if (user_get_uses_homed (user)) {
                         g_autoptr (GError) inner_error = NULL;
                         save_homed_extra_data (g_dbus_method_invocation_get_connection (context), user, &inner_error);
                         if (inner_error != NULL) {
@@ -2529,7 +2531,7 @@ user_set_password_expiration_policy_authorized_cb (Daemon                *daemon
 
         g_object_freeze_notify (G_OBJECT (user));
 
-        if (user->uses_homed) {
+        if (user_get_uses_homed (user)) {
                 g_autoptr (json_object) record = NULL;
                 g_autoptr (GHashTable) blobs = NULL;
 
@@ -2674,7 +2676,7 @@ user_set_user_expiration_policy_authorized_cb (Daemon                *daemon,
 
         g_object_freeze_notify (G_OBJECT (user));
 
-        if (user->uses_homed) {
+        if (user_get_uses_homed (user)) {
                 g_autoptr (json_object) record = NULL;
                 g_autoptr (GHashTable) blobs = NULL;
 
@@ -2781,7 +2783,7 @@ user_change_location_authorized_cb (Daemon                *daemon,
         if (g_strcmp0 (accounts_user_get_location (ACCOUNTS_USER (user)), location) != 0) {
                 accounts_user_set_location (ACCOUNTS_USER (user), location);
 
-                if (user->uses_homed) {
+                if (user_get_uses_homed (user)) {
                         g_autoptr (GError) inner_error = NULL;
                         save_homed_extra_data (g_dbus_method_invocation_get_connection (context), user, &inner_error);
                         if (inner_error != NULL) {
@@ -2873,7 +2875,7 @@ user_set_home_directory (AccountsUser          *auser,
 {
         User *user = (User *) auser;
 
-        if (user->uses_homed) {
+        if (user_get_uses_homed (user)) {
                 throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change home directory for user managed by systemd-homed");
                 return TRUE;
         }
@@ -2907,7 +2909,7 @@ user_change_shell_authorized_cb (Daemon                *daemon,
                          accounts_user_get_uid (ACCOUNTS_USER (user)),
                          shell);
 
-                if (user->uses_homed) {
+                if (user_get_uses_homed (user)) {
                         g_autoptr (json_object) record = NULL;
                         g_autoptr (GHashTable) blobs = NULL;
 
@@ -3202,8 +3204,8 @@ user_set_icon_file (AccountsUser          *auser,
         daemon_local_check_auth (user->daemon,
                                  user,
                                  action_id,
-                                 user->uses_homed ? user_change_icon_file_homed_authorized_cb
-                                                  : user_change_icon_file_classic_authorized_cb,
+                                 user_get_uses_homed (user) ? user_change_icon_file_homed_authorized_cb
+                                                            : user_change_icon_file_classic_authorized_cb,
                                  context,
                                  g_strdup (filename),
                                  (GDestroyNotify) g_free);
@@ -3229,7 +3231,7 @@ user_change_locked_authorized_cb (Daemon                *daemon,
                          accounts_user_get_user_name (ACCOUNTS_USER (user)),
                          accounts_user_get_uid (ACCOUNTS_USER (user)));
 
-             if (user->uses_homed) {
+                if (user_get_uses_homed (user)) {
                         g_autoptr (json_object) record = NULL;
                         g_autoptr (GHashTable) blobs = NULL;
 
@@ -3487,7 +3489,7 @@ user_change_account_type_authorized_cb (Daemon                *daemon,
                          accounts_user_get_uid (ACCOUNTS_USER (user)),
                          account_type);
 
-                if (user->uses_homed)
+                if (user_get_uses_homed (user))
                         ok = user_change_account_type_homed (context, user, account_type);
                 else
                         ok = user_change_account_type_shadow (context, user, account_type);
@@ -3547,7 +3549,7 @@ user_change_password_mode_authorized_cb (Daemon                *daemon,
 
                 g_object_freeze_notify (G_OBJECT (user));
 
-                if (user->uses_homed) {
+                if (user_get_uses_homed (user)) {
                         g_autoptr (json_object) record = NULL;
                         g_autoptr (GHashTable) blobs = NULL;
 
@@ -3657,7 +3659,7 @@ user_set_password_mode (AccountsUser          *auser,
                 return TRUE;
         }
 
-        if (user->uses_homed && mode == PASSWORD_MODE_NONE) {
+        if (user_get_uses_homed (user) && mode == PASSWORD_MODE_NONE) {
                 throw_error (context, ERROR_NOT_SUPPORTED, "PASSWORD_MODE_NONE is not supported by systemd-homed");
                 return TRUE;
         }
@@ -3751,7 +3753,7 @@ user_set_password (AccountsUser          *auser,
         const gchar *action_id;
         gint uid;
 
-        if (user->uses_homed) {
+        if (user_get_uses_homed (user)) {
                 throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change passwords for user managed by systemd-homed");
                 return TRUE;
         }
@@ -3805,7 +3807,7 @@ user_change_password_hint_authorized_cb (Daemon                *daemon,
         if (g_strcmp0 (accounts_user_get_password_hint (ACCOUNTS_USER (user)), hint) != 0) {
                 accounts_user_set_password_hint (ACCOUNTS_USER (user), hint);
 
-                if (user->uses_homed) {
+                if (user_get_uses_homed (user)) {
                         g_autoptr (GError) inner_error = NULL;
                         save_homed_extra_data (g_dbus_method_invocation_get_connection (context), user, &inner_error);
                         if (inner_error != NULL) {
@@ -3886,7 +3888,7 @@ user_set_automatic_login (AccountsUser          *auser,
 {
         User *user = (User *) auser;
 
-        if (user->uses_homed) {
+        if (user_get_uses_homed (user)) {
                 throw_error (context, ERROR_NOT_SUPPORTED, "Cannot change user managed by systemd-homed");
                 return TRUE;
         }
@@ -3971,7 +3973,6 @@ user_accounts_user_iface_init (AccountsUserIface *iface)
 static void
 user_init (User *user)
 {
-        user->uses_homed = FALSE;
         user->system_bus_connection = NULL;
         user->default_icon_file = NULL;
         user->login_history = NULL;
