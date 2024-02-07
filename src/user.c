@@ -85,6 +85,7 @@ struct User
 
         gboolean             uses_homed;
         gchar               *blob_dir;
+        json_object         *json_extension;
 
         guint               *extension_ids;
         guint                n_extension_ids;
@@ -799,6 +800,17 @@ user_update_from_json (User       *user,
                 }
         }
 
+        /* We put all the extension-related properties in a special namespace */
+        if (json_object_object_get_ex (root, "org.freedesktop.Accounts", &member)) {
+                if (json_object_get_type (member) != json_type_object)
+                        /* This isn't an assert, because unlike the other settings this is nonstandard.
+                         * homed should always give us valid JSON for the standard records, but for this
+                         * one it's completely undefined and thus homed makes no attempt to validate it */
+                        g_critical ("Our JSON extension field is invalid!");
+                else
+                        user->json_extension = json_object_get (member);
+        }
+
         /* Some properties we can set only once we have all the data about the user */
 
         if (accounts_user_get_uid (ACCOUNTS_USER (user)) == 0)
@@ -1073,6 +1085,11 @@ user_json_apply_extra_data (User        *user,
         const gchar * const *languages;
         json_object *privileged = NULL;
 
+        if (user->json_extension)
+                json_object_object_add (obj, "org.freedesktop.Accounts", json_object_get (user->json_extension));
+        else
+                json_object_object_del (obj, "org.freedesktop.Accounts");
+
         val = accounts_user_get_email (ACCOUNTS_USER (user));
         if (val != NULL)
                 json_object_object_add (obj, "emailAddress", json_object_new_string (val));
@@ -1302,6 +1319,35 @@ move_extra_data (const gchar *old_name,
         g_rename (old_filename, new_filename);
 }
 
+static gchar *
+user_extension_get_printed (User       *user,
+                            const char *iface_name,
+                            const char *prop_name)
+{
+        json_object *iface, *prop;
+
+        if (!user->uses_homed)
+                return g_key_file_get_value (user->keyfile, iface_name, prop_name, NULL);
+
+        if (!json_object_object_get_ex (user->json_extension, iface_name, &iface))
+                return NULL;
+
+        if (json_object_get_type (iface) != json_type_object) {
+                g_critical ("JSON for extension iface %s isn't an object!", iface_name);
+                return NULL;
+        }
+
+        if (!json_object_object_get_ex (iface, prop_name, &prop))
+                return NULL;
+
+        if (json_object_get_type (prop) != json_type_string) {
+                g_critical ("JSON for extension %s %s isn't a string!", iface_name, prop_name);
+                return NULL;
+        }
+
+        return g_strdup (json_object_get_string (prop));
+}
+
 static GVariant *
 user_extension_get_value (User                    *user,
                           GDBusInterfaceInfo      *interface,
@@ -1313,7 +1359,7 @@ user_extension_get_value (User                    *user,
         gint i;
 
         /* First, try to get the value from the keyfile */
-        printed = g_key_file_get_value (user->keyfile, interface->name, property->name, NULL);
+        printed = user_extension_get_printed (user, interface->name, property->name);
         if (printed) {
                 value = g_variant_parse (type, printed, NULL, NULL, NULL);
                 if (value != NULL)
@@ -1383,6 +1429,69 @@ user_extension_get_all_properties (User                  *user,
 }
 
 static void
+user_extension_set_printed (GDBusConnection *bus,
+                            User            *user,
+                            const char      *iface_name,
+                            const char      *prop_name,
+                            const char      *printed,
+                            GError         **error)
+{
+        json_object *iface = NULL;
+
+        if (!user->uses_homed) {
+                g_key_file_set_value (user->keyfile, iface_name, prop_name, printed);
+                save_extra_data (user);
+                return;
+        }
+
+        if (!user->json_extension)
+                user->json_extension = json_object_new_object ();
+
+        if (!json_object_object_get_ex (user->json_extension, iface_name, &iface)) {
+                iface = json_object_new_object ();
+                json_object_object_add (user->json_extension, iface_name, iface);
+        } else if (json_object_get_type (iface) != json_type_object) {
+                g_critical ("JSON for extension iface %s isn't an object!", iface_name);
+                return;
+        }
+
+        if (printed != NULL)
+                json_object_object_add (iface, prop_name, json_object_new_string (printed));
+        else
+                json_object_object_del (iface, prop_name);
+
+        /* If we're unsetting the field, we might end up with blank objects. So let's clean up */
+        if (json_object_object_length (iface) == 0)
+                json_object_object_del (user->json_extension, iface_name);
+        if (json_object_object_length (user->json_extension) == 0)
+                json_object_put (g_steal_pointer (&user->json_extension));
+
+        /* Commit the changes to homed */
+        save_homed_extra_data (bus, user, error);
+}
+
+static void throw_error (GDBusMethodInvocation *context,
+                         gint                   error_code,
+                         const gchar           *format,
+                         ...) G_GNUC_PRINTF (3, 4);
+
+static void
+throw_error (GDBusMethodInvocation *context,
+             gint                   error_code,
+             const gchar           *format,
+             ...)
+{
+        va_list args;
+        g_autofree gchar *message = NULL;
+
+        va_start (args, format);
+        message = g_strdup_vprintf (format, args);
+        va_end (args);
+
+        g_dbus_method_invocation_return_error (context, ERROR, error_code, "%s", message);
+}
+
+static void
 user_extension_set_property (User                  *user,
                              Daemon                *daemon,
                              GDBusInterfaceInfo    *interface,
@@ -1402,10 +1511,21 @@ user_extension_set_property (User                  *user,
         printed = g_variant_print (value, FALSE);
 
         /* May as well try to avoid the thrashing... */
-        prev = g_key_file_get_value (user->keyfile, interface->name, property->name, NULL);
+        prev = user_extension_get_printed (user, interface->name, property->name);
 
         if (!prev || !g_str_equal (printed, prev)) {
-                g_key_file_set_value (user->keyfile, interface->name, property->name, printed);
+                g_autoptr (GError) error = NULL;
+
+                user_extension_set_printed (g_dbus_method_invocation_get_connection (invocation),
+                                            user,
+                                            interface->name,
+                                            property->name,
+                                            printed,
+                                            &error);
+                if (error != NULL) {
+                        throw_error (invocation, ERROR_FAILED, "Failed to store property with homed: %s", error->message);
+                        return;
+                }
 
                 /* Emit a change signal.  Use invalidation
                  * because the data may not be world-readable.
@@ -1419,7 +1539,6 @@ user_extension_set_property (User                  *user,
                                                NULL);
 
                 accounts_user_emit_changed (ACCOUNTS_USER (user));
-                save_extra_data (user);
         }
 
         g_dbus_method_invocation_return_value (invocation, g_variant_new ("()"));
@@ -1743,27 +1862,6 @@ user_set_saved (User    *user,
                 gboolean saved)
 {
         accounts_user_set_saved (ACCOUNTS_USER (user), saved);
-}
-
-static void throw_error (GDBusMethodInvocation *context,
-                         gint                   error_code,
-                         const gchar           *format,
-                         ...) G_GNUC_PRINTF (3, 4);
-
-static void
-throw_error (GDBusMethodInvocation *context,
-             gint                   error_code,
-             const gchar           *format,
-             ...)
-{
-        va_list args;
-        g_autofree gchar *message = NULL;
-
-        va_start (args, format);
-        message = g_strdup_vprintf (format, args);
-        va_end (args);
-
-        g_dbus_method_invocation_return_error (context, ERROR, error_code, "%s", message);
 }
 
 static void
@@ -3828,6 +3926,7 @@ user_finalize (GObject *object)
         g_clear_pointer (&user->last_change_time, g_date_time_unref);
 
         g_free (user->blob_dir);
+        json_object_put (user->json_extension);
 
         if (G_OBJECT_CLASS (user_parent_class)->finalize)
                 (*G_OBJECT_CLASS (user_parent_class)->finalize) (object);
