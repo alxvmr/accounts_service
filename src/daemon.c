@@ -322,6 +322,7 @@ entry_generator_fgetpwent (Daemon       *daemon,
                         shadow_entry_buffers = generator_state->shadow_users
                                              ? g_hash_table_lookup (generator_state->shadow_users, pwent->pw_name)
                                              : NULL;
+                        *spent = NULL;
 
                         if (shadow_entry_buffers != NULL) {
                                 *spent = &shadow_entry_buffers->spbuf;
