@@ -1,3 +1,3 @@
 [remote "upstream"]
-	url = git://anongit.freedesktop.org/accountsservice
+	url = https://gitlab.freedesktop.org/accountsservice/accountsservice.git
 	fetch = +refs/heads/*:refs/remotes/upstream/*
