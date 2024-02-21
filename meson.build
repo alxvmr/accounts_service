@@ -57,6 +57,7 @@ config_h.set_quoted('GETTEXT_PACKAGE', act_gettext)
 
 # headers
 check_headers = [
+  'crypt.h',
   'paths.h',
   'shadow.h',
   'utmpx.h',
@@ -76,6 +77,10 @@ check_functions = [
 foreach func: check_functions
   config_h.set('HAVE_' + func.underscorify().to_upper(), cc.has_function(func))
 endforeach
+
+if cc.has_member('struct passwd', 'pw_expire', prefix : '#include <pwd.h>')
+  config_h.set('HAVE_STRUCT_PASSWD_PW_EXPIRE', 1)
+endif
 
 if cc.has_header_symbol('utmpx.h', 'WTMPX_FILENAME', prefix: '#define _GNU_SOURCE')
   code = '''#define _GNU_SOURCE
@@ -159,8 +164,9 @@ polkit_gobject_dep = dependency('polkit-gobject-1')
 # (96 bits for sha512crypt, as more is not supported by this method, since
 # the effectively used maximum is 16 base64-encoded characters)
 crypt_dep = dependency('libxcrypt', required: false, version: '>= 4')
-config_h.set('HAVE_CRYPT_GENSALT', crypt_dep.found())
-if not crypt_dep.found()
+if crypt_dep.found() and get_option('libxcrypt')
+  config_h.set('HAVE_CRYPT_GENSALT', 1)
+else
   crypt_dep = cc.find_library('crypt')
 endif
 

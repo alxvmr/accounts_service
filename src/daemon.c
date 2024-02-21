@@ -2,6 +2,8 @@
  *
  * Copyright (C) 2009-2010 Red Hat, Inc.
  * Copyright (c) 2013 Canonical Limited
+ * Copyright (c) 2023 Serenity Cybersecurity, LLC <license@futurecrew.ru>
+ *               Author: Gleb Popov <arrowd@FreeBSD.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -215,6 +217,58 @@ remove_cache_files (const gchar *user_name)
         g_remove (icon_filename);
 }
 
+typedef struct
+{
+        struct spwd spbuf;
+        char        buf[1024];
+} ShadowEntryBuffers;
+
+static GHashTable * build_shadow_users_hash (GHashTable *local_users)
+{
+        GHashTable *shadow_users = NULL;
+
+#ifdef HAVE_SHADOW_H
+        struct spwd *shadow_entry;
+        g_autofree char *shadow_path = NULL;
+        FILE *fp;
+
+        shadow_path = g_build_filename (get_sysconfdir (), PATH_SHADOW, NULL);
+        fp = fopen (shadow_path, "r");
+        if (fp == NULL) {
+                g_warning ("Unable to open %s: %s", shadow_path, g_strerror (errno));
+                return NULL;
+        }
+
+        shadow_users = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+
+        do {
+                int ret = 0;
+
+                ShadowEntryBuffers *shadow_entry_buffers = g_malloc0 (sizeof(*shadow_entry_buffers));
+
+                ret = fgetspent_r (fp, &shadow_entry_buffers->spbuf, shadow_entry_buffers->buf, sizeof(shadow_entry_buffers->buf), &shadow_entry);
+                if (ret == 0) {
+                        g_hash_table_insert (shadow_users, g_strdup (shadow_entry->sp_namp), shadow_entry_buffers);
+                        g_hash_table_add (local_users, g_strdup (shadow_entry->sp_namp));
+                } else {
+                        g_free (shadow_entry_buffers);
+
+                        if (errno != EINTR) {
+                                break;
+                        }
+                }
+        } while (shadow_entry != NULL);
+
+        fclose (fp);
+
+        if (g_hash_table_size (shadow_users) == 0) {
+                g_clear_pointer (&shadow_users, g_hash_table_unref);
+                return NULL;
+        }
+#endif
+        return shadow_users;
+}
+
 static struct passwd *
 entry_generator_fgetpwent (Daemon       *daemon,
                            GHashTable   *users,
@@ -224,11 +278,7 @@ entry_generator_fgetpwent (Daemon       *daemon,
 {
         struct passwd *pwent;
 
-        struct
-        {
-                struct spwd spbuf;
-                char        buf[1024];
-        } *shadow_entry_buffers;
+        ShadowEntryBuffers *shadow_entry_buffers;
 
         struct
         {
@@ -243,44 +293,10 @@ entry_generator_fgetpwent (Daemon       *daemon,
         /* First iteration */
         if (*state == NULL) {
                 GHashTable *shadow_users = NULL;
-                g_autofree char *shadow_path = NULL;
                 g_autofree char *passwd_path = NULL;
                 FILE *fp;
-                struct spwd *shadow_entry;
 
-                shadow_path = g_build_filename (get_sysconfdir (), PATH_SHADOW, NULL);
-                fp = fopen (shadow_path, "r");
-                if (fp == NULL) {
-                        g_warning ("Unable to open %s: %s", shadow_path, g_strerror (errno));
-                        return NULL;
-                }
-
-                shadow_users = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
-
-                do {
-                        int ret = 0;
-
-                        shadow_entry_buffers = g_malloc0 (sizeof(*shadow_entry_buffers));
-
-                        ret = fgetspent_r (fp, &shadow_entry_buffers->spbuf, shadow_entry_buffers->buf, sizeof(shadow_entry_buffers->buf), &shadow_entry);
-                        if (ret == 0) {
-                                g_hash_table_insert (shadow_users, g_strdup (shadow_entry->sp_namp), shadow_entry_buffers);
-                                g_hash_table_add (local_users, g_strdup (shadow_entry->sp_namp));
-                        } else {
-                                g_free (shadow_entry_buffers);
-
-                                if (errno != EINTR) {
-                                        break;
-                                }
-                        }
-                } while (shadow_entry != NULL);
-
-                fclose (fp);
-
-                if (g_hash_table_size (shadow_users) == 0) {
-                        g_clear_pointer (&shadow_users, g_hash_table_unref);
-                        return NULL;
-                }
+                shadow_users = build_shadow_users_hash (local_users);
 
                 passwd_path = g_build_filename (get_sysconfdir (), PATH_PASSWD, NULL);
                 fp = fopen (passwd_path, "r");
@@ -303,7 +319,9 @@ entry_generator_fgetpwent (Daemon       *daemon,
         if (g_hash_table_size (users) < MAX_LOCAL_USERS) {
                 pwent = fgetpwent (generator_state->fp);
                 if (pwent != NULL) {
-                        shadow_entry_buffers = g_hash_table_lookup (generator_state->shadow_users, pwent->pw_name);
+                        shadow_entry_buffers = generator_state->shadow_users
+                                             ? g_hash_table_lookup (generator_state->shadow_users, pwent->pw_name)
+                                             : NULL;
 
                         if (shadow_entry_buffers != NULL) {
                                 *spent = &shadow_entry_buffers->spbuf;
@@ -321,7 +339,8 @@ entry_generator_fgetpwent (Daemon       *daemon,
         }
 
         fclose (generator_state->fp);
-        g_hash_table_unref (generator_state->shadow_users);
+        if (generator_state->shadow_users)
+                g_hash_table_unref (generator_state->shadow_users);
         g_free (generator_state);
         *state = NULL;
 
@@ -376,7 +395,9 @@ entry_generator_cachedir (Daemon       *daemon,
                         errno = 0;
                         pwent = getpwnam (name);
                         if (pwent != NULL) {
+#ifdef HAVE_SHADOW_H
                                 *shadow_entry = getspnam (pwent->pw_name);
+#endif
 
                                 return pwent;
                         } else if (errno == 0) {
@@ -447,7 +468,9 @@ entry_generator_requested_users (Daemon       *daemon,
                                 if (pwent == NULL) {
                                         g_debug ("user '%s' requested previously but not present on system", name);
                                 } else {
+#ifdef HAVE_SHADOW_H
                                         *shadow_entry = getspnam (pwent->pw_name);
+#endif
 
                                         return pwent;
                                 }
@@ -1013,8 +1036,10 @@ daemon_local_find_user_by_id (Daemon *daemon,
         user = g_hash_table_lookup (priv->users, pwent->pw_name);
 
         if (user == NULL) {
-                struct spwd *spent;
+                struct spwd *spent = NULL;
+#ifdef HAVE_SHADOW_H
                 spent = getspnam (pwent->pw_name);
+#endif
                 user = add_new_user_for_pwent (daemon, pwent, spent);
 
                 priv->explicitly_requested_users = g_list_append (priv->explicitly_requested_users,
@@ -1041,8 +1066,10 @@ daemon_local_find_user_by_name (Daemon      *daemon,
         user = g_hash_table_lookup (priv->users, pwent->pw_name);
 
         if (user == NULL) {
-                struct spwd *spent;
+                struct spwd *spent = NULL;
+#ifdef HAVE_SHADOW_H
                 spent = getspnam (pwent->pw_name);
+#endif
                 user = add_new_user_for_pwent (daemon, pwent, spent);
 
                 priv->explicitly_requested_users = g_list_append (priv->explicitly_requested_users,

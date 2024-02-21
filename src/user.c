@@ -4,6 +4,8 @@
  * Copyright (C) 2007-2008 William Jon McCann <mccann@jhu.edu>
  * Copyright (C) 2009-2010 Red Hat, Inc.
  * Copyright © 2013 Canonical Limited
+ * Copyright (c) 2023 Serenity Cybersecurity, LLC <license@futurecrew.ru>
+ *               Author: Gleb Popov <arrowd@FreeBSD.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -213,10 +215,10 @@ expand_template_variables (User       *user,
                                 g_autofree char *variable = NULL;
                                 const char *value;
 
+                                variable = g_strndup (start, p - start);
+
                                 if (brackets && *p == '}')
                                         p++;
-
-                                variable = g_strndup (start, p - start - 1);
 
                                 value = g_hash_table_lookup (template_variables, variable);
                                 if (value) {
@@ -313,8 +315,6 @@ initialize_template_environment (User               *user,
 static void
 user_update_from_template (User *user)
 {
-        g_autofree char *filename = NULL;
-
         g_autoptr (GKeyFile) key_file = NULL;
         g_autoptr (GError) error = NULL;
         g_autoptr (GHashTable) template_variables = NULL;
@@ -333,14 +333,8 @@ user_update_from_template (User *user)
         g_autofree char *contents = NULL;
         g_autofree char *expanded = NULL;
 
-        g_auto (GStrv) lines = NULL;
-
         if (user->template_loaded)
                 return;
-
-        filename = g_build_filename (get_userdir (),
-                                     accounts_user_get_user_name (ACCOUNTS_USER (user)),
-                                     NULL);
 
         account_type = accounts_user_get_account_type (ACCOUNTS_USER (user));
         if (account_type == ACCOUNT_TYPE_ADMINISTRATOR)
@@ -390,7 +384,6 @@ user_update_from_template (User *user)
 
         g_key_file_remove_group (key_file, "Template", NULL);
         contents = g_key_file_to_data (key_file, NULL, NULL);
-        lines = g_strsplit (contents, "\n", -1);
 
         expanded = expand_template_variables (user, template_variables, contents);
 
@@ -503,6 +496,10 @@ user_update_from_pwent (User          *user,
                 user->days_to_warn = spent->sp_warn;
                 user->days_after_expiration_until_lock = spent->sp_inact;
                 user->account_expiration_policy_known = TRUE;
+        } else {
+#ifdef HAVE_STRUCT_PASSWD_PW_EXPIRE
+                user->user_expiration_time = g_date_time_new_from_unix_utc (pwent->pw_expire);
+#endif
         }
 
         accounts_user_set_password_mode (ACCOUNTS_USER (user), mode);

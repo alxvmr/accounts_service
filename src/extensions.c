@@ -19,8 +19,6 @@
  * Written by: Ryan Lortie <desrt@desrt.ca>
  */
 
-#include "config.h"
-
 #include "daemon.h"
 
 #include <gio/gio.h>

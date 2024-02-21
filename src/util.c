@@ -202,19 +202,24 @@ out:
 gint
 get_user_groups (const gchar *user,
                  gid_t        group,
-                 gid_t      **groups)
+                 gid_t      **out_groups)
 {
         gint res;
         gint ngroups;
+        g_autofree gid_t *groups = NULL;
 
         ngroups = 0;
         res = getgrouplist (user, group, NULL, &ngroups);
 
         g_debug ("user %s has %d groups", user, ngroups);
-        *groups = g_new (gid_t, ngroups);
-        res = getgrouplist (user, group, *groups, &ngroups);
+        groups = g_new (gid_t, ngroups);
+        res = getgrouplist (user, group, groups, &ngroups);
 
-        return res;
+        if (res == -1)
+                return res;
+
+        *out_groups = g_steal_pointer (&groups);
+        return ngroups;
 }
 
 /**

@@ -115,8 +115,8 @@ class TestAccountsServicePreExistingUser(AccountsServiceTestBase):
             self.assertTrue(user_objects[instance].is_loaded())
 
         for user in user_objects:
-            self.assertEquals(user.get_user_name(), 'pizza')
-            self.assertEquals(user.get_uid(), 2001)
+            self.assertEqual(user.get_user_name(), 'pizza')
+            self.assertEqual(user.get_uid(), 2001)
 
 @unittest.skipUnless(have_accounts_service,
                      'AccountsService gi introspection not available')
