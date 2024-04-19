@@ -103,7 +103,8 @@ typedef struct
 
         guint            autologin_id;
 
-        PolkitAuthority *authority;
+        PolkitAuthority *authority;          /* (not nullable) (owned) */
+
         GHashTable      *extension_ifaces;   /* (not nullable) (owned) (element-type utf8 GDBusInterfaceInfo) */
 } DaemonPrivate;
 
@@ -937,6 +938,8 @@ daemon_dispose (GObject *object)
         g_clear_object (&priv->wtmp_monitor);
 
         g_clear_handle_id (&priv->reload_id, g_source_remove);
+
+        g_clear_object (&priv->authority);
 
         G_OBJECT_CLASS (daemon_parent_class)->dispose (object);
 }
