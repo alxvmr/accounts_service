@@ -6,12 +6,12 @@ envs = environment()
 # Enable debug messages and abort on critical warnings
 envs.set('G_DEBUG', 'fatal-criticals')
 envs.set('G_MESSAGES_DEBUG', 'all')
-envs.set('top_srcdir', meson.source_root())
-envs.set('top_builddir', meson.build_root())
+envs.set('top_srcdir', meson.project_source_root())
+envs.set('top_builddir', meson.project_build_root())
 envs.set('MOCKLIBC_LD_PRELOAD', libmocklibc.full_path())
 
 # Setup paths
-accountsservice_build_dir = meson.build_root() / 'src' / 'libaccountsservice'
+accountsservice_build_dir = meson.project_build_root() / 'src' / 'libaccountsservice'
 envs.prepend('LD_LIBRARY_PATH', accountsservice_build_dir)
 
 python3_test_modules_found = false
