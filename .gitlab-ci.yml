@@ -33,7 +33,7 @@ build-fedora:
     - unset CI_JOB_JWT
     - dnf install -y $DEPENDENCIES $([ $CI_JOB_STAGE = test ] && echo $TEST_DEPENDENCIES)
   script:
-    - meson setup -Dgtk_doc=true _build
+    - meson setup --werror --fatal-meson-warnings -Dgtk_doc=true _build
     - meson compile -C _build
   artifacts:
     name: log-and-build
