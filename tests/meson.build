@@ -26,7 +26,7 @@ if get_option('introspection')
     foreach module : python3_test_modules
         if run_command(python3, '-c', 'import @0@'.format(module), check: false).returncode() != 0
             python3_test_modules_found = false
-            warning('Python3 module \'' + module + '\' needed by test suite not found')
+            message('Python3 module \'' + module + '\' needed by test suite not found')
             break
         endif
     endforeach
@@ -72,7 +72,7 @@ if python3_test_modules_found
         endforeach
     endforeach
 else
-    warning('Skipping AccuntsService tests as introspection bindings are missing')
+    message('Skipping AccountsService tests as introspection bindings are missing')
 
     foreach test_name: tests
         test(test_name, find_program('sh'), args: ['-c', 'exit 77'])
