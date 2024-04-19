@@ -88,7 +88,7 @@ typedef struct
         gsize            number_of_normal_users;
         GList           *explicitly_requested_users;
 
-        User            *autologin;
+        User            *autologin;      /* (nullable) (owned) */
 
         GFileMonitor    *passwd_monitor;
         GFileMonitor    *shadow_monitor;
@@ -912,6 +912,9 @@ daemon_dispose (GObject *object)
         DaemonPrivate *priv = daemon_get_instance_private (daemon);
 
         g_clear_object (&priv->bus_connection);
+
+        g_clear_object (&priv->autologin);
+        g_clear_handle_id (&priv->autologin_id, g_source_remove);
 
         G_OBJECT_CLASS (daemon_parent_class)->dispose (object);
 }
@@ -1946,8 +1949,7 @@ daemon_local_set_automatic_login (Daemon  *daemon,
 
         if (enabled) {
                 g_object_set (user, "automatic-login", TRUE, NULL);
-                g_object_ref (user);
-                priv->autologin = user;
+                priv->autologin = g_object_ref (user);
         }
 
         return TRUE;
