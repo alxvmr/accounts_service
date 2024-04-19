@@ -45,12 +45,12 @@ top_inc = include_directories('.')
 
 cc = meson.get_compiler('c')
 
+add_project_arguments('-D_GNU_SOURCE -D_DEFAULT_SOURCE', language: 'c')
+
 config_h = configuration_data()
 
 # defines
 config_h.set_quoted('VERSION', act_version)
-config_h.set('_DEFAULT_SOURCE', true)
-config_h.set('_GNU_SOURCE', true)
 
 # i18n
 config_h.set_quoted('GETTEXT_PACKAGE', act_gettext)
