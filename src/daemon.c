@@ -59,11 +59,10 @@
 #define PATH_GROUP "/etc/group"
 #define PATH_DM     "/etc/systemd/system/display-manager.service"
 
-enum
+typedef enum
 {
-        PROP_0,
-        PROP_DAEMON_VERSION
-};
+        PROP_DAEMON_VERSION = 1,
+} DaemonProperty;
 
 typedef enum
 {
@@ -2003,7 +2002,7 @@ get_property (GObject    *object,
               GValue     *value,
               GParamSpec *pspec)
 {
-        switch (prop_id) {
+        switch ((DaemonProperty) prop_id) {
         case PROP_DAEMON_VERSION:
                 g_value_set_string (value, VERSION);
                 break;
@@ -2020,7 +2019,7 @@ set_property (GObject      *object,
               const GValue *value,
               GParamSpec   *pspec)
 {
-        switch (prop_id) {
+        switch ((DaemonProperty) prop_id) {
         case PROP_DAEMON_VERSION:
                 g_assert_not_reached ();
                 break;
