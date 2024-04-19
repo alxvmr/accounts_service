@@ -134,6 +134,14 @@ daemon_read_extension_directory (GHashTable  *ifaces,
         g_dir_close (dir);
 }
 
+/**
+ * daemon_read_extension_ifaces:
+ *
+ * Read the set of installed extension interfaces from the file system.
+ *
+ * Returns: (not nullable) (transfer container) (element-type utf8 GDBusInterfaceInfo):
+ *     map of extension D-Bus interface name to #GDBusInterfaceInfo
+ */
 GHashTable *
 daemon_read_extension_ifaces (void)
 {

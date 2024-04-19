@@ -104,7 +104,7 @@ typedef struct
         guint            autologin_id;
 
         PolkitAuthority *authority;
-        GHashTable      *extension_ifaces;
+        GHashTable      *extension_ifaces;   /* (not nullable) (owned) (element-type utf8 GDBusInterfaceInfo) */
 } DaemonPrivate;
 
 typedef struct passwd * (* EntryGeneratorFunc) (Daemon *,
@@ -1950,6 +1950,15 @@ daemon_local_set_automatic_login (Daemon  *daemon,
         return TRUE;
 }
 
+/**
+ * daemon_get_extension_ifaces:
+ * @daemon: a #Daemon
+ *
+ * Get the set of currently installed extension interfaces.
+ *
+ * Returns: (transfer none) (element-type utf8 GDBusInterfaceInfo): map of
+ *     extension D-Bus interface name to #GDBusInterfaceInfo
+ */
 GHashTable *
 daemon_get_extension_ifaces (Daemon *daemon)
 {
