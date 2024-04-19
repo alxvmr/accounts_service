@@ -342,7 +342,7 @@ user_update_from_template (User *user)
         else
                 account_type_string = "standard";
 
-        dirs = g_ptr_array_new ();
+        dirs = g_ptr_array_new_with_free_func (g_free);
         for (i = 0; system_dirs[i] != NULL; i++) {
                 for (j = 0; system_dirs[i][j] != NULL; j++) {
                         char *dir;
