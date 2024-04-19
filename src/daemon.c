@@ -829,9 +829,16 @@ typedef void FileChangeCallback (GFileMonitor     *monitor,
                                  GFileMonitorEvent event_type,
                                  Daemon           *daemon);
 
+typedef enum
+{
+        MONITOR_TYPE_FILE,
+        MONITOR_TYPE_DIRECTORY,
+} MonitorType;
+
 static GFileMonitor *
 setup_monitor (Daemon             *daemon,
                const gchar        *path,
+               MonitorType         type,
                FileChangeCallback *callback)
 {
         g_autoptr (GFile) file = NULL;
@@ -843,10 +850,23 @@ setup_monitor (Daemon             *daemon,
         }
 
         file = g_file_new_for_path (path);
-        monitor = g_file_monitor_file (file,
-                                       G_FILE_MONITOR_NONE,
-                                       NULL,
-                                       &error);
+        switch (type) {
+        case MONITOR_TYPE_FILE:
+                monitor = g_file_monitor_file (file,
+                                               G_FILE_MONITOR_NONE,
+                                               NULL,
+                                               &error);
+                break;
+        case MONITOR_TYPE_DIRECTORY:
+                monitor = g_file_monitor_directory (file,
+                                                    G_FILE_MONITOR_NONE,
+                                                    NULL,
+                                                    &error);
+                break;
+        default:
+                g_assert_not_reached ();
+        }
+
         if (monitor == NULL) {
                 g_warning ("Unable to monitor %s: %s", path, error->message);
                 return NULL;
@@ -878,17 +898,21 @@ daemon_init (Daemon *daemon)
         passwd_path = g_build_filename (get_sysconfdir (), PATH_PASSWD, NULL);
         priv->passwd_monitor = setup_monitor (daemon,
                                               passwd_path,
+                                              MONITOR_TYPE_FILE,
                                               on_users_monitor_changed);
         shadow_path = g_build_filename (get_sysconfdir (), PATH_SHADOW, NULL);
         priv->shadow_monitor = setup_monitor (daemon,
                                               shadow_path,
+                                              MONITOR_TYPE_FILE,
                                               on_users_monitor_changed);
         priv->group_monitor = setup_monitor (daemon,
                                              PATH_GROUP,
+                                             MONITOR_TYPE_FILE,
                                              on_users_monitor_changed);
 
         priv->wtmp_monitor = setup_monitor (daemon,
                                             wtmp_helper_get_path_for_monitor (),
+                                            MONITOR_TYPE_FILE,
                                             on_users_monitor_changed);
 
         dm_type = get_current_system_dm_type ();
@@ -899,6 +923,7 @@ daemon_init (Daemon *daemon)
 
         priv->dm_monitor = setup_monitor (daemon,
                                           dm_path,
+                                          MONITOR_TYPE_FILE,
                                           on_dm_monitor_changed);
 
         reload_users_timeout (daemon);
