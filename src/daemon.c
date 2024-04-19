@@ -906,18 +906,21 @@ daemon_init (Daemon *daemon)
 }
 
 static void
+daemon_dispose (GObject *object)
+{
+        Daemon *daemon = DAEMON (object);
+        DaemonPrivate *priv = daemon_get_instance_private (daemon);
+
+        g_clear_object (&priv->bus_connection);
+
+        G_OBJECT_CLASS (daemon_parent_class)->dispose (object);
+}
+
+static void
 daemon_finalize (GObject *object)
 {
-        DaemonPrivate *priv;
-        Daemon *daemon;
-
-        g_return_if_fail (IS_DAEMON (object));
-
-        daemon = DAEMON (object);
-        priv = daemon_get_instance_private (daemon);
-
-        if (priv->bus_connection != NULL)
-                g_object_unref (priv->bus_connection);
+        Daemon *daemon = DAEMON (object);
+        DaemonPrivate *priv = daemon_get_instance_private (daemon);
 
         g_queue_free_full (priv->pending_list_cached_users,
                            (GDestroyNotify) list_user_data_free);
@@ -2006,6 +2009,7 @@ daemon_class_init (DaemonClass *klass)
 {
         GObjectClass *object_class = G_OBJECT_CLASS (klass);
 
+        object_class->dispose = daemon_dispose;
         object_class->finalize = daemon_finalize;
         object_class->get_property = get_property;
         object_class->set_property = set_property;
