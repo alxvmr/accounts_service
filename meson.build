@@ -172,14 +172,14 @@ endif
 
 dbus_dep = dependency('dbus-1')
 if dbus_dep.version().version_compare('>=1.9.18')
-  dbus_conf_dir = join_paths(dbus_dep.get_pkgconfig_variable('datadir', define_variable: ['datadir', act_datadir]), 'dbus-1', 'system.d')
+  dbus_conf_dir = join_paths(dbus_dep.get_variable(pkgconfig: 'datadir', pkgconfig_define: ['datadir', act_datadir]), 'dbus-1', 'system.d')
 else
-  dbus_conf_dir = join_paths(dbus_dep.get_pkgconfig_variable('sysconfdir', define_variable: ['sysconfdir', act_sysconfdir]), 'dbus-1', 'system.d')
+  dbus_conf_dir = join_paths(dbus_dep.get_variable(pkgconfig: 'sysconfdir', pkgconfig_define: ['sysconfdir', act_sysconfdir]), 'dbus-1', 'system.d')
 endif
-dbus_ifaces_dir = dbus_dep.get_pkgconfig_variable('interfaces_dir', define_variable: ['datadir', act_datadir])
-dbus_sys_dir = dbus_dep.get_pkgconfig_variable('system_bus_services_dir', define_variable: ['datadir', act_datadir])
+dbus_ifaces_dir = dbus_dep.get_variable(pkgconfig: 'interfaces_dir', pkgconfig_define: ['datadir', act_datadir])
+dbus_sys_dir = dbus_dep.get_variable(pkgconfig: 'system_bus_services_dir', pkgconfig_define: ['datadir', act_datadir])
 
-policy_dir = polkit_gobject_dep.get_pkgconfig_variable('policydir', define_variable: ['prefix', act_prefix])
+policy_dir = polkit_gobject_dep.get_variable(pkgconfig: 'policydir', pkgconfig_define: ['prefix', act_prefix])
 
 # FIXME: systemd.pc file does not use variables with relative paths, so `define_variable` cannot be used
 systemd_system_unit_dir = get_option('systemdsystemunitdir')
@@ -188,7 +188,7 @@ install_systemd_unit_dir = (systemd_system_unit_dir != 'no')
 if install_systemd_unit_dir and systemd_system_unit_dir == ''
   systemd_dep = dependency('systemd', required: false)
   assert(systemd_dep.found(), 'systemd required but not found, please provide a valid systemd user unit dir or disable it')
-  systemd_system_unit_dir = systemd_dep.get_pkgconfig_variable('systemdsystemunitdir')
+  systemd_system_unit_dir = systemd_dep.get_variable(pkgconfig: 'systemdsystemunitdir')
 endif
 
 # Core configuration
