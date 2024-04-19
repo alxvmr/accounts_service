@@ -147,12 +147,11 @@ daemon_read_extension_ifaces (void)
 {
         const gchar * const *data_dirs;
         GHashTable *ifaces;
-        gint i;
 
         ifaces = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) g_dbus_interface_info_unref);
 
         data_dirs = g_get_system_data_dirs ();
-        for (i = 0; data_dirs[i]; i++) {
+        for (gsize i = 0; data_dirs[i]; i++) {
                 g_autofree gchar *path = g_build_filename (data_dirs[i], "accountsservice/interfaces", NULL);
                 daemon_read_extension_directory (ifaces, path);
         }
