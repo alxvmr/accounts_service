@@ -3,7 +3,7 @@ project(
   version: run_command(['./generate-version.sh'], check: true).stdout().strip(),
   license: 'GPL3+',
   default_options: 'buildtype=debugoptimized',
-  meson_version: '>= 0.50.0',
+  meson_version: '>= 0.63.0',
 )
 
 act_name = meson.project_name()
