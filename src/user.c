@@ -56,6 +56,7 @@ struct User
         gchar               *object_path;
 
         Daemon              *daemon;
+        gulong               daemon_notify_extension_interfaces_id;
 
         GKeyFile            *keyfile;
 
@@ -75,6 +76,7 @@ struct User
         gboolean             template_loaded;
         gboolean             local_account_overridden;
 
+        GHashTable          *extensions;  /* (owned) (element-type utf8 GDBusInterfaceInfo) */
         guint               *extension_ids;
         guint                n_extension_ids;
 
@@ -914,7 +916,7 @@ user_extension_method_call (GDBusConnection       *connection,
                 }
         }
 
-        iface_info = g_hash_table_lookup (daemon_get_extension_ifaces (user->daemon), interface_name);
+        iface_info = g_hash_table_lookup (user->extensions, interface_name);
         g_assert (iface_info != NULL);
 
         for (i = 0; iface_info->annotations && iface_info->annotations[i]; i++) {
@@ -942,18 +944,18 @@ user_register_extensions (User *user)
                 NULL /* get_property */,
                 NULL /* set_property */
         };
-        GHashTable *extensions;
         GHashTableIter iter;
         gpointer iface;
         gint i = 0;
 
+        g_assert (user->extensions == NULL);
         g_assert (user->extension_ids == NULL);
         g_assert (user->n_extension_ids == 0);
 
-        extensions = daemon_get_extension_ifaces (user->daemon);
-        user->n_extension_ids = g_hash_table_size (extensions);
+        user->extensions = daemon_dup_extension_ifaces (user->daemon);
+        user->n_extension_ids = g_hash_table_size (user->extensions);
         user->extension_ids = g_new (guint, user->n_extension_ids);
-        g_hash_table_iter_init (&iter, extensions);
+        g_hash_table_iter_init (&iter, user->extensions);
 
         /* Ignore errors when registering more interfaces because (a)
          * they won't happen and (b) even if they do, we still want to
@@ -981,6 +983,24 @@ user_unregister_extensions (User *user)
                 g_clear_pointer (&user->extension_ids, g_free);
                 user->n_extension_ids = 0;
         }
+
+        g_clear_pointer (&user->extensions, g_hash_table_unref);
+}
+
+static void
+notify_extension_interfaces_cb (GObject    *obj,
+                                GParamSpec *pspec,
+                                gpointer    user_data)
+{
+        User *user = USER (user_data);
+
+        /* Reload the extension interfaces. Unregister all of them and then
+         * re-register them all, rather than trying to work out exactly what’s
+         * changed, because we currently don’t notify about interface changes
+         * through anything like o.fd.DBus.ObjectManager, so the registration
+         * and unregistration just happen within this process. */
+        user_unregister_extensions (user);
+        user_register_extensions (user);
 }
 
 static gchar *
@@ -1071,6 +1091,9 @@ user_new (Daemon *daemon,
 
         user = g_object_new (TYPE_USER, NULL);
         user->daemon = daemon;
+        user->daemon_notify_extension_interfaces_id =
+                g_signal_connect (daemon, "notify::extension-interfaces",
+                                  G_CALLBACK (notify_extension_interfaces_cb), user);
         accounts_user_set_uid (ACCOUNTS_USER (user), uid);
 
         return user;
@@ -2689,6 +2712,10 @@ user_finalize (GObject *object)
         User *user;
 
         user = USER (object);
+
+        if (user->daemon_notify_extension_interfaces_id != 0)
+                g_signal_handler_disconnect (user->daemon, user->daemon_notify_extension_interfaces_id);
+        user->daemon_notify_extension_interfaces_id = 0;
 
         if (user->changed_timeout_id != 0)
                 g_source_remove (user->changed_timeout_id);

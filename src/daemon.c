@@ -61,8 +61,12 @@
 
 typedef enum
 {
-        PROP_DAEMON_VERSION = 1,
+        PROP_EXTENSION_INTERFACES = 1,
+        /* Overridden properties: */
+        PROP_DAEMON_VERSION,
 } DaemonProperty;
+
+static GParamSpec *obj_properties[PROP_EXTENSION_INTERFACES + 1] = { NULL, };
 
 typedef enum
 {
@@ -105,6 +109,7 @@ typedef struct
         PolkitAuthority *authority;          /* (not nullable) (owned) */
 
         GHashTable      *extension_ifaces;   /* (not nullable) (owned) (element-type utf8 GDBusInterfaceInfo) */
+        GPtrArray       *extension_monitors; /* (not nullable) (owned) (element-type GFileMonitor) */
 } DaemonPrivate;
 
 typedef struct passwd * (* EntryGeneratorFunc) (Daemon *,
@@ -823,6 +828,27 @@ on_dm_monitor_changed (GFileMonitor     *monitor,
         queue_reload_autologin (daemon);
 }
 
+static void
+on_extensions_monitor_changed (GFileMonitor     *monitor,
+                               GFile            *file,
+                               GFile            *other_file,
+                               GFileMonitorEvent event_type,
+                               Daemon           *daemon)
+{
+        DaemonPrivate *priv = daemon_get_instance_private (daemon);
+
+        if (event_type != G_FILE_MONITOR_EVENT_CHANGED &&
+            event_type != G_FILE_MONITOR_EVENT_CREATED &&
+            event_type != G_FILE_MONITOR_EVENT_DELETED) {
+                return;
+        }
+
+        /* Reload the extensions. */
+        g_hash_table_unref (priv->extension_ifaces);
+        priv->extension_ifaces = daemon_read_extension_ifaces (NULL);
+        g_object_notify_by_pspec (G_OBJECT (daemon), obj_properties[PROP_EXTENSION_INTERFACES]);
+}
+
 typedef void FileChangeCallback (GFileMonitor     *monitor,
                                  GFile            *file,
                                  GFile            *other_file,
@@ -889,7 +915,19 @@ daemon_init (Daemon *daemon)
         g_autofree char *dm_path = NULL;
         DisplayManagerType dm_type;
 
-        priv->extension_ifaces = daemon_read_extension_ifaces ();
+        g_auto (GStrv) extension_dirs = NULL;
+
+        priv->extension_ifaces = daemon_read_extension_ifaces (&extension_dirs);
+        priv->extension_monitors = g_ptr_array_new_with_free_func (g_object_unref);
+        for (guint i = 0; extension_dirs[i] != NULL; i++) {
+                g_autoptr (GFileMonitor) monitor = NULL;
+                const char *path = extension_dirs[i];
+
+                monitor = setup_monitor (daemon, path, MONITOR_TYPE_DIRECTORY, on_extensions_monitor_changed);
+
+                if (monitor != NULL)
+                        g_ptr_array_add (priv->extension_monitors, g_steal_pointer (&monitor));
+        }
 
         priv->users = create_users_hash_table ();
 
@@ -964,6 +1002,8 @@ daemon_dispose (GObject *object)
         g_clear_handle_id (&priv->reload_id, g_source_remove);
 
         g_clear_object (&priv->authority);
+
+        g_clear_pointer (&priv->extension_monitors, g_ptr_array_unref);
 
         G_OBJECT_CLASS (daemon_parent_class)->dispose (object);
 }
@@ -2005,20 +2045,22 @@ daemon_local_set_automatic_login (Daemon  *daemon,
 }
 
 /**
- * daemon_get_extension_ifaces:
+ * daemon_dup_extension_ifaces:
  * @daemon: a #Daemon
  *
  * Get the set of currently installed extension interfaces.
  *
- * Returns: (transfer none) (element-type utf8 GDBusInterfaceInfo): map of
+ * The contents of the hash table is guaranteed not to change.
+ *
+ * Returns: (transfer container) (element-type utf8 GDBusInterfaceInfo): map of
  *     extension D-Bus interface name to #GDBusInterfaceInfo
  */
 GHashTable *
-daemon_get_extension_ifaces (Daemon *daemon)
+daemon_dup_extension_ifaces (Daemon *daemon)
 {
         DaemonPrivate *priv = daemon_get_instance_private (daemon);
 
-        return priv->extension_ifaces;
+        return g_hash_table_ref (priv->extension_ifaces);
 }
 
 static void
@@ -2027,11 +2069,16 @@ get_property (GObject    *object,
               GValue     *value,
               GParamSpec *pspec)
 {
+        Daemon *daemon = DAEMON (object);
+        DaemonPrivate *priv = daemon_get_instance_private (daemon);
+
         switch ((DaemonProperty) prop_id) {
         case PROP_DAEMON_VERSION:
                 g_value_set_string (value, VERSION);
                 break;
-
+        case PROP_EXTENSION_INTERFACES:
+                g_value_set_boxed (value, priv->extension_ifaces);
+                break;
         default:
                 G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
                 break;
@@ -2048,7 +2095,10 @@ set_property (GObject      *object,
         case PROP_DAEMON_VERSION:
                 g_assert_not_reached ();
                 break;
-
+        case PROP_EXTENSION_INTERFACES:
+                /* Read only */
+                g_assert_not_reached ();
+                break;
         default:
                 G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
                 break;
@@ -2068,6 +2118,24 @@ daemon_class_init (DaemonClass *klass)
         g_object_class_override_property (object_class,
                                           PROP_DAEMON_VERSION,
                                           "daemon-version");
+
+        /**
+         * Daemon:extension-interfaces: (element-type utf8 GDBusInterfaceInfo)
+         *
+         * Hash table of extension interfaces which are currently installed.
+         *
+         * #GObject::notify will be emitted if the set of installed extension
+         * interfaces changes.
+         */
+        obj_properties[PROP_EXTENSION_INTERFACES] =
+                g_param_spec_boxed ("extension-interfaces",
+                                    NULL, NULL,
+                                    G_TYPE_HASH_TABLE,
+                                    G_PARAM_READABLE | G_PARAM_STATIC_STRINGS | G_PARAM_EXPLICIT_NOTIFY);
+
+        g_object_class_install_properties (object_class,
+                                           G_N_ELEMENTS (obj_properties),
+                                           obj_properties);
 }
 
 static void
