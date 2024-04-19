@@ -936,6 +936,8 @@ daemon_dispose (GObject *object)
                 g_file_monitor_cancel (priv->wtmp_monitor);
         g_clear_object (&priv->wtmp_monitor);
 
+        g_clear_handle_id (&priv->reload_id, g_source_remove);
+
         G_OBJECT_CLASS (daemon_parent_class)->dispose (object);
 }
 
