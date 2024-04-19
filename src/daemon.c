@@ -90,11 +90,11 @@ typedef struct
 
         User            *autologin;      /* (nullable) (owned) */
 
-        GFileMonitor    *passwd_monitor;
-        GFileMonitor    *shadow_monitor;
-        GFileMonitor    *group_monitor;
-        GFileMonitor    *dm_monitor;
-        GFileMonitor    *wtmp_monitor;
+        GFileMonitor    *passwd_monitor; /* (nullable) (owned) */
+        GFileMonitor    *shadow_monitor; /* (nullable) (owned) */
+        GFileMonitor    *group_monitor;  /* (nullable) (owned) */
+        GFileMonitor    *dm_monitor;     /* (nullable) (owned) */
+        GFileMonitor    *wtmp_monitor;   /* (nullable) (owned) */
 
         GQueue          *pending_list_cached_users;
 
@@ -915,6 +915,26 @@ daemon_dispose (GObject *object)
 
         g_clear_object (&priv->autologin);
         g_clear_handle_id (&priv->autologin_id, g_source_remove);
+
+        if (priv->passwd_monitor != NULL)
+                g_file_monitor_cancel (priv->passwd_monitor);
+        g_clear_object (&priv->passwd_monitor);
+
+        if (priv->shadow_monitor != NULL)
+                g_file_monitor_cancel (priv->shadow_monitor);
+        g_clear_object (&priv->shadow_monitor);
+
+        if (priv->group_monitor != NULL)
+                g_file_monitor_cancel (priv->group_monitor);
+        g_clear_object (&priv->group_monitor);
+
+        if (priv->dm_monitor != NULL)
+                g_file_monitor_cancel (priv->dm_monitor);
+        g_clear_object (&priv->dm_monitor);
+
+        if (priv->wtmp_monitor != NULL)
+                g_file_monitor_cancel (priv->wtmp_monitor);
+        g_clear_object (&priv->wtmp_monitor);
 
         G_OBJECT_CLASS (daemon_parent_class)->dispose (object);
 }
