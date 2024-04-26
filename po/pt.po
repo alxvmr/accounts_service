@@ -1,61 +1,80 @@
 # SOME DESCRIPTIVE TITLE.
 # Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
 # This file is distributed under the same license as the PACKAGE package.
-# 
+#
 # Translators:
-# Pedro Albuquerque <pmra@gmx.com>, 2015,2018
+# Pedro Albuquerque <pmra@gmx.com>, 2015, 2016, 2017, 2018.
+# Hugo Carvalho <hugokarvalho@hotmail.com>, 2020, 2021, 2022, 2023, 2024.
 msgid ""
 msgstr ""
 "Project-Id-Version: accounts service\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2013-01-17 09:48-0500\n"
-"PO-Revision-Date: 2019-02-22 14:19+0000\n"
-"Last-Translator: Pedro Albuquerque <pmra@gmx.com>\n"
-"Language-Team: Portuguese (http://www.transifex.com/freedesktop/accountsservice/language/pt/)\n"
+"Report-Msgid-Bugs-To: https://gitlab.freedesktop.org/accountsservice/"
+"accountsservice/issues\n"
+"POT-Creation-Date: 2024-04-26 03:24+0000\n"
+"PO-Revision-Date: 2024-04-26 14:47+0100\n"
+"Last-Translator: Hugo Carvalho <hugokarvalho@hotmail.com>\n"
+"Language-Team: Portuguese (http://www.transifex.com/freedesktop/"
+"accountsservice/language/pt/)\n"
+"Language: pt\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Language: pt\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: Poedit 3.4.2\n"
 
-#: ../data/org.freedesktop.accounts.policy.in.h:1
+#: data/org.freedesktop.accounts.policy.in:11
 msgid "Change your own user data"
 msgstr "Alterar os seus próprios dados"
 
-#: ../data/org.freedesktop.accounts.policy.in.h:2
+#: data/org.freedesktop.accounts.policy.in:12
 msgid "Authentication is required to change your own user data"
-msgstr "É necessária autenticação para alterar os seus próprios dados de utilizador"
+msgstr ""
+"É necessária autenticação para alterar os seus próprios dados de utilizador"
 
-#: ../data/org.freedesktop.accounts.policy.in.h:3
+#: data/org.freedesktop.accounts.policy.in:21
+msgid "Change your own user password"
+msgstr "Alterar a sua própria palavra-passe de utilizador"
+
+#: data/org.freedesktop.accounts.policy.in:22
+msgid "Authentication is required to change your own user password"
+msgstr ""
+"É necessária autenticação para alterar a sua própria palavra-passe de "
+"utilizador"
+
+#: data/org.freedesktop.accounts.policy.in:31
 msgid "Manage user accounts"
 msgstr "Gerir contas de utilizador"
 
-#: ../data/org.freedesktop.accounts.policy.in.h:4
+#: data/org.freedesktop.accounts.policy.in:32
 msgid "Authentication is required to change user data"
 msgstr "É necessária autenticação para alterar dados de utilizador"
 
-#: ../data/org.freedesktop.accounts.policy.in.h:5
+#: data/org.freedesktop.accounts.policy.in:41
 msgid "Change the login screen configuration"
 msgstr "Alterar a configuração do ecrã de início de sessão"
 
-#: ../data/org.freedesktop.accounts.policy.in.h:6
+#: data/org.freedesktop.accounts.policy.in:42
 msgid "Authentication is required to change the login screen configuration"
-msgstr "É necessária autenticação para alterar a configuração do ecrã de início de sessão"
+msgstr ""
+"É necessária autenticação para alterar a configuração do ecrã de início de "
+"sessão"
 
-#: ../src/main.c:127
+#: src/main.c:223
 msgid "Output version information and exit"
 msgstr "Mostrar informação da versão e sair"
 
-#: ../src/main.c:128
+#: src/main.c:224
 msgid "Replace existing instance"
 msgstr "Substituir instância existente"
 
-#: ../src/main.c:129
+#: src/main.c:225
 msgid "Enable debugging code"
 msgstr "Activar código de depuração"
 
-#: ../src/main.c:149
+#: src/main.c:244
 msgid ""
 "Provides D-Bus interfaces for querying and manipulating\n"
 "user account information."
-msgstr "Fornece ambiente D-Bus para consulta e manipulação\nde informação de conta de utilizador."
+msgstr ""
+"Fornece ambiente D-Bus para consulta e manipulação\n"
+"de informação de conta de utilizador."
