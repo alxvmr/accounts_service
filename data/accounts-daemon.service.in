@@ -5,6 +5,8 @@ Description=Accounts Service
 # winbind, we need to ensure that Accounts Service starts after
 # nss-user-lookup.target
 After=nss-user-lookup.target
+After=dbus.service
+Wants=dbus.service
 
 [Service]
 Type=dbus
