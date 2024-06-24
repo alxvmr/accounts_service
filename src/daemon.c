@@ -59,11 +59,14 @@
 #define PATH_GROUP "/etc/group"
 #define PATH_DM     "/etc/systemd/system/display-manager.service"
 
-enum
+typedef enum
 {
-        PROP_0,
-        PROP_DAEMON_VERSION
-};
+        PROP_EXTENSION_INTERFACES = 1,
+        /* Overridden properties: */
+        PROP_DAEMON_VERSION,
+} DaemonProperty;
+
+static GParamSpec *obj_properties[PROP_EXTENSION_INTERFACES + 1] = { NULL, };
 
 typedef enum
 {
@@ -88,13 +91,13 @@ typedef struct
         gsize            number_of_normal_users;
         GList           *explicitly_requested_users;
 
-        User            *autologin;
+        User            *autologin;      /* (nullable) (owned) */
 
-        GFileMonitor    *passwd_monitor;
-        GFileMonitor    *shadow_monitor;
-        GFileMonitor    *group_monitor;
-        GFileMonitor    *dm_monitor;
-        GFileMonitor    *wtmp_monitor;
+        GFileMonitor    *passwd_monitor; /* (nullable) (owned) */
+        GFileMonitor    *shadow_monitor; /* (nullable) (owned) */
+        GFileMonitor    *group_monitor;  /* (nullable) (owned) */
+        GFileMonitor    *dm_monitor;     /* (nullable) (owned) */
+        GFileMonitor    *wtmp_monitor;   /* (nullable) (owned) */
 
         GQueue          *pending_list_cached_users;
 
@@ -103,8 +106,10 @@ typedef struct
 
         guint            autologin_id;
 
-        PolkitAuthority *authority;
-        GHashTable      *extension_ifaces;
+        PolkitAuthority *authority;          /* (not nullable) (owned) */
+
+        GHashTable      *extension_ifaces;   /* (not nullable) (owned) (element-type utf8 GDBusInterfaceInfo) */
+        GPtrArray       *extension_monitors; /* (not nullable) (owned) (element-type GFileMonitor) */
 } DaemonPrivate;
 
 typedef struct passwd * (* EntryGeneratorFunc) (Daemon *,
@@ -823,15 +828,43 @@ on_dm_monitor_changed (GFileMonitor     *monitor,
         queue_reload_autologin (daemon);
 }
 
+static void
+on_extensions_monitor_changed (GFileMonitor     *monitor,
+                               GFile            *file,
+                               GFile            *other_file,
+                               GFileMonitorEvent event_type,
+                               Daemon           *daemon)
+{
+        DaemonPrivate *priv = daemon_get_instance_private (daemon);
+
+        if (event_type != G_FILE_MONITOR_EVENT_CHANGED &&
+            event_type != G_FILE_MONITOR_EVENT_CREATED &&
+            event_type != G_FILE_MONITOR_EVENT_DELETED) {
+                return;
+        }
+
+        /* Reload the extensions. */
+        g_hash_table_unref (priv->extension_ifaces);
+        priv->extension_ifaces = daemon_read_extension_ifaces (NULL);
+        g_object_notify_by_pspec (G_OBJECT (daemon), obj_properties[PROP_EXTENSION_INTERFACES]);
+}
+
 typedef void FileChangeCallback (GFileMonitor     *monitor,
                                  GFile            *file,
                                  GFile            *other_file,
                                  GFileMonitorEvent event_type,
                                  Daemon           *daemon);
 
+typedef enum
+{
+        MONITOR_TYPE_FILE,
+        MONITOR_TYPE_DIRECTORY,
+} MonitorType;
+
 static GFileMonitor *
 setup_monitor (Daemon             *daemon,
                const gchar        *path,
+               MonitorType         type,
                FileChangeCallback *callback)
 {
         g_autoptr (GFile) file = NULL;
@@ -843,10 +876,23 @@ setup_monitor (Daemon             *daemon,
         }
 
         file = g_file_new_for_path (path);
-        monitor = g_file_monitor_file (file,
-                                       G_FILE_MONITOR_NONE,
-                                       NULL,
-                                       &error);
+        switch (type) {
+        case MONITOR_TYPE_FILE:
+                monitor = g_file_monitor_file (file,
+                                               G_FILE_MONITOR_NONE,
+                                               NULL,
+                                               &error);
+                break;
+        case MONITOR_TYPE_DIRECTORY:
+                monitor = g_file_monitor_directory (file,
+                                                    G_FILE_MONITOR_NONE,
+                                                    NULL,
+                                                    &error);
+                break;
+        default:
+                g_assert_not_reached ();
+        }
+
         if (monitor == NULL) {
                 g_warning ("Unable to monitor %s: %s", path, error->message);
                 return NULL;
@@ -869,7 +915,19 @@ daemon_init (Daemon *daemon)
         g_autofree char *dm_path = NULL;
         DisplayManagerType dm_type;
 
-        priv->extension_ifaces = daemon_read_extension_ifaces ();
+        g_auto (GStrv) extension_dirs = NULL;
+
+        priv->extension_ifaces = daemon_read_extension_ifaces (&extension_dirs);
+        priv->extension_monitors = g_ptr_array_new_with_free_func (g_object_unref);
+        for (guint i = 0; extension_dirs[i] != NULL; i++) {
+                g_autoptr (GFileMonitor) monitor = NULL;
+                const char *path = extension_dirs[i];
+
+                monitor = setup_monitor (daemon, path, MONITOR_TYPE_DIRECTORY, on_extensions_monitor_changed);
+
+                if (monitor != NULL)
+                        g_ptr_array_add (priv->extension_monitors, g_steal_pointer (&monitor));
+        }
 
         priv->users = create_users_hash_table ();
 
@@ -878,17 +936,21 @@ daemon_init (Daemon *daemon)
         passwd_path = g_build_filename (get_sysconfdir (), PATH_PASSWD, NULL);
         priv->passwd_monitor = setup_monitor (daemon,
                                               passwd_path,
+                                              MONITOR_TYPE_FILE,
                                               on_users_monitor_changed);
         shadow_path = g_build_filename (get_sysconfdir (), PATH_SHADOW, NULL);
         priv->shadow_monitor = setup_monitor (daemon,
                                               shadow_path,
+                                              MONITOR_TYPE_FILE,
                                               on_users_monitor_changed);
         priv->group_monitor = setup_monitor (daemon,
                                              PATH_GROUP,
+                                             MONITOR_TYPE_FILE,
                                              on_users_monitor_changed);
 
         priv->wtmp_monitor = setup_monitor (daemon,
                                             wtmp_helper_get_path_for_monitor (),
+                                            MONITOR_TYPE_FILE,
                                             on_users_monitor_changed);
 
         dm_type = get_current_system_dm_type ();
@@ -899,6 +961,7 @@ daemon_init (Daemon *daemon)
 
         priv->dm_monitor = setup_monitor (daemon,
                                           dm_path,
+                                          MONITOR_TYPE_FILE,
                                           on_dm_monitor_changed);
 
         reload_users_timeout (daemon);
@@ -906,18 +969,50 @@ daemon_init (Daemon *daemon)
 }
 
 static void
+daemon_dispose (GObject *object)
+{
+        Daemon *daemon = DAEMON (object);
+        DaemonPrivate *priv = daemon_get_instance_private (daemon);
+
+        g_clear_object (&priv->bus_connection);
+
+        g_clear_object (&priv->autologin);
+        g_clear_handle_id (&priv->autologin_id, g_source_remove);
+
+        if (priv->passwd_monitor != NULL)
+                g_file_monitor_cancel (priv->passwd_monitor);
+        g_clear_object (&priv->passwd_monitor);
+
+        if (priv->shadow_monitor != NULL)
+                g_file_monitor_cancel (priv->shadow_monitor);
+        g_clear_object (&priv->shadow_monitor);
+
+        if (priv->group_monitor != NULL)
+                g_file_monitor_cancel (priv->group_monitor);
+        g_clear_object (&priv->group_monitor);
+
+        if (priv->dm_monitor != NULL)
+                g_file_monitor_cancel (priv->dm_monitor);
+        g_clear_object (&priv->dm_monitor);
+
+        if (priv->wtmp_monitor != NULL)
+                g_file_monitor_cancel (priv->wtmp_monitor);
+        g_clear_object (&priv->wtmp_monitor);
+
+        g_clear_handle_id (&priv->reload_id, g_source_remove);
+
+        g_clear_object (&priv->authority);
+
+        g_clear_pointer (&priv->extension_monitors, g_ptr_array_unref);
+
+        G_OBJECT_CLASS (daemon_parent_class)->dispose (object);
+}
+
+static void
 daemon_finalize (GObject *object)
 {
-        DaemonPrivate *priv;
-        Daemon *daemon;
-
-        g_return_if_fail (IS_DAEMON (object));
-
-        daemon = DAEMON (object);
-        priv = daemon_get_instance_private (daemon);
-
-        if (priv->bus_connection != NULL)
-                g_object_unref (priv->bus_connection);
+        Daemon *daemon = DAEMON (object);
+        DaemonPrivate *priv = daemon_get_instance_private (daemon);
 
         g_queue_free_full (priv->pending_list_cached_users,
                            (GDestroyNotify) list_user_data_free);
@@ -1968,19 +2063,29 @@ daemon_local_set_automatic_login (Daemon  *daemon,
 
         if (enabled) {
                 g_object_set (user, "automatic-login", TRUE, NULL);
-                g_object_ref (user);
-                priv->autologin = user;
+                priv->autologin = g_object_ref (user);
         }
 
         return TRUE;
 }
 
+/**
+ * daemon_dup_extension_ifaces:
+ * @daemon: a #Daemon
+ *
+ * Get the set of currently installed extension interfaces.
+ *
+ * The contents of the hash table is guaranteed not to change.
+ *
+ * Returns: (transfer container) (element-type utf8 GDBusInterfaceInfo): map of
+ *     extension D-Bus interface name to #GDBusInterfaceInfo
+ */
 GHashTable *
-daemon_get_extension_ifaces (Daemon *daemon)
+daemon_dup_extension_ifaces (Daemon *daemon)
 {
         DaemonPrivate *priv = daemon_get_instance_private (daemon);
 
-        return priv->extension_ifaces;
+        return g_hash_table_ref (priv->extension_ifaces);
 }
 
 static void
@@ -1989,11 +2094,16 @@ get_property (GObject    *object,
               GValue     *value,
               GParamSpec *pspec)
 {
-        switch (prop_id) {
+        Daemon *daemon = DAEMON (object);
+        DaemonPrivate *priv = daemon_get_instance_private (daemon);
+
+        switch ((DaemonProperty) prop_id) {
         case PROP_DAEMON_VERSION:
                 g_value_set_string (value, VERSION);
                 break;
-
+        case PROP_EXTENSION_INTERFACES:
+                g_value_set_boxed (value, priv->extension_ifaces);
+                break;
         default:
                 G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
                 break;
@@ -2006,11 +2116,14 @@ set_property (GObject      *object,
               const GValue *value,
               GParamSpec   *pspec)
 {
-        switch (prop_id) {
+        switch ((DaemonProperty) prop_id) {
         case PROP_DAEMON_VERSION:
                 g_assert_not_reached ();
                 break;
-
+        case PROP_EXTENSION_INTERFACES:
+                /* Read only */
+                g_assert_not_reached ();
+                break;
         default:
                 G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
                 break;
@@ -2022,6 +2135,7 @@ daemon_class_init (DaemonClass *klass)
 {
         GObjectClass *object_class = G_OBJECT_CLASS (klass);
 
+        object_class->dispose = daemon_dispose;
         object_class->finalize = daemon_finalize;
         object_class->get_property = get_property;
         object_class->set_property = set_property;
@@ -2029,6 +2143,24 @@ daemon_class_init (DaemonClass *klass)
         g_object_class_override_property (object_class,
                                           PROP_DAEMON_VERSION,
                                           "daemon-version");
+
+        /**
+         * Daemon:extension-interfaces: (element-type utf8 GDBusInterfaceInfo)
+         *
+         * Hash table of extension interfaces which are currently installed.
+         *
+         * #GObject::notify will be emitted if the set of installed extension
+         * interfaces changes.
+         */
+        obj_properties[PROP_EXTENSION_INTERFACES] =
+                g_param_spec_boxed ("extension-interfaces",
+                                    NULL, NULL,
+                                    G_TYPE_HASH_TABLE,
+                                    G_PARAM_READABLE | G_PARAM_STATIC_STRINGS | G_PARAM_EXPLICIT_NOTIFY);
+
+        g_object_class_install_properties (object_class,
+                                           G_N_ELEMENTS (obj_properties),
+                                           obj_properties);
 }
 
 static void

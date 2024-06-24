@@ -134,19 +134,43 @@ daemon_read_extension_directory (GHashTable  *ifaces,
         g_dir_close (dir);
 }
 
+/**
+ * daemon_read_extension_ifaces:
+ * @directories_out: (optional) (not nullable) (out callee-allocates) (transfer full)
+ *     (element-type filename) (array zero-terminated=1):
+ *     return location for an array of paths for the extension directories,
+ *     or %NULL to ignore
+ *
+ * Read the set of installed extension interfaces from the file system.
+ *
+ * Returns: (not nullable) (transfer container) (element-type utf8 GDBusInterfaceInfo):
+ *     map of extension D-Bus interface name to #GDBusInterfaceInfo
+ */
 GHashTable *
-daemon_read_extension_ifaces (void)
+daemon_read_extension_ifaces (char ***directories_out)
 {
         const gchar * const *data_dirs;
         GHashTable *ifaces;
-        gint i;
+
+        g_autoptr (GPtrArray) directories = NULL;
 
         ifaces = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, (GDestroyNotify) g_dbus_interface_info_unref);
 
+        if (directories_out != NULL)
+                directories = g_ptr_array_new_with_free_func (g_free);
+
         data_dirs = g_get_system_data_dirs ();
-        for (i = 0; data_dirs[i]; i++) {
+        for (gsize i = 0; data_dirs[i]; i++) {
                 g_autofree gchar *path = g_build_filename (data_dirs[i], "accountsservice/interfaces", NULL);
                 daemon_read_extension_directory (ifaces, path);
+
+                if (directories != NULL)
+                        g_ptr_array_add (directories, g_strdup (path));
+        }
+
+        if (directories_out != NULL) {
+                g_ptr_array_add (directories, NULL);  /* NULL terminator */
+                *directories_out = (char **) g_ptr_array_steal (directories, NULL);
         }
 
         return ifaces;

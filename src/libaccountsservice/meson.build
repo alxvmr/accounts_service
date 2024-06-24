@@ -65,8 +65,6 @@ pkg.generate(
   filebase: act_name,
   subdirs: act_api_name,
   variables: [
-    'exec_prefix=${prefix}',
-    'datadir=${prefix}/' + get_option('datadir'),
     'interfacesdir=${datadir}/accountsservice/interfaces',
   ],
   requires_private : [

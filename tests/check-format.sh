@@ -26,15 +26,19 @@ if [ "$DIRTY_TREE" -ne 0 ]; then
 fi
 
 find -name '*.[ch]' -exec uncrustify -q -c tests/latest-uncrustify.cfg --replace {} \;
-git diff > after
+
+echo > after
+find -name '*.[ch]' -exec git diff -- {} \; >> after
 
 git reset --hard $UPSTREAM_BRANCH
+
 find -name '*.[ch]' -exec uncrustify -q -c tests/latest-uncrustify.cfg --replace {} \;
-git diff > before
+echo > before
+find -name '*.[ch]' -exec git diff -- {} \; >> before
 
-interdiff --no-revert-omitted before after > diff
+interdiff -B --no-revert-omitted before after > diff
 
-if [ -n "$(cat diff)" ]; then
+if [ -n "$(cat diff | grep -vE '^only in patch[12]:')" ]; then
     echo "Uncrustify found style abnormalities" 2>&1
     cat diff
     exit 1

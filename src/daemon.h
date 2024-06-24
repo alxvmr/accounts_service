@@ -93,5 +93,5 @@ gboolean   daemon_local_set_automatic_login (Daemon  *daemon,
                                              gboolean enabled,
                                              GError **error);
 
-GHashTable * daemon_read_extension_ifaces (void);
-GHashTable * daemon_get_extension_ifaces (Daemon *daemon);
+GHashTable * daemon_read_extension_ifaces (char ***directories_out);
+GHashTable * daemon_dup_extension_ifaces (Daemon *daemon);
