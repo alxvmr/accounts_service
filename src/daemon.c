@@ -56,6 +56,7 @@
 
 #define PATH_PASSWD "passwd"
 #define PATH_SHADOW "shadow"
+#define PATH_TCB "tcb"
 #define PATH_GROUP "/etc/group"
 #define PATH_DM     "/etc/systemd/system/display-manager.service"
 
@@ -234,43 +235,51 @@ static GHashTable * build_shadow_users_hash (GHashTable *local_users)
 
 #ifdef HAVE_SHADOW_H
         struct spwd *shadow_entry;
+        g_autofree char *tcb_path = g_build_filename(get_sysconfdir(), PATH_TCB, NULL);
         g_autofree char *shadow_path = NULL;
         FILE *fp;
+        DIR *dir;
+        struct dirent *ent;
 
-        shadow_path = g_build_filename (get_sysconfdir (), PATH_SHADOW, NULL);
-        fp = fopen (shadow_path, "r");
-        if (fp == NULL) {
-                g_warning ("Unable to open %s: %s", shadow_path, g_strerror (errno));
-                return NULL;
+        dir = opendir(tcb_path);
+        if (dir) {
+              shadow_users = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+              while ((ent = readdir(dir)) != NULL)  {
+                    shadow_path = g_build_filename(tcb_path, ent->d_name, PATH_SHADOW, NULL);
+
+                    fp = fopen (shadow_path, "r");
+                    if (fp == NULL){
+                            g_warning("Unable to open %s: %s", shadow_path, g_strerror (errno));
+                            continue;
+                    }
+
+                    int ret = 0;
+
+                    ShadowEntryBuffers *shadow_entry_buffers = g_malloc0 (sizeof(*shadow_entry_buffers));
+
+                    ret = fgetspent_r (fp, &shadow_entry_buffers->spbuf, shadow_entry_buffers->buf, sizeof(shadow_entry_buffers->buf), &shadow_entry);
+                    if (ret == 0) {
+                            g_hash_table_insert (shadow_users, g_strdup (shadow_entry->sp_namp), shadow_entry_buffers);
+                            g_hash_table_add (local_users, g_strdup (shadow_entry->sp_namp));
+                    } else {
+                            g_free (shadow_entry_buffers);
+
+                            if (errno != EINTR) {
+                                continue;
+                            }
+                    }
+                    fclose (fp);
+              }
         }
 
-        shadow_users = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
-
-        do {
-                int ret = 0;
-
-                ShadowEntryBuffers *shadow_entry_buffers = g_malloc0 (sizeof(*shadow_entry_buffers));
-
-                ret = fgetspent_r (fp, &shadow_entry_buffers->spbuf, shadow_entry_buffers->buf, sizeof(shadow_entry_buffers->buf), &shadow_entry);
-                if (ret == 0) {
-                        g_hash_table_insert (shadow_users, g_strdup (shadow_entry->sp_namp), shadow_entry_buffers);
-                        g_hash_table_add (local_users, g_strdup (shadow_entry->sp_namp));
-                } else {
-                        g_free (shadow_entry_buffers);
-
-                        if (errno != EINTR) {
-                                break;
-                        }
-                }
-        } while (shadow_entry != NULL);
-
-        fclose (fp);
+        (void) closedir (dir);
 
         if (g_hash_table_size (shadow_users) == 0) {
                 g_clear_pointer (&shadow_users, g_hash_table_unref);
                 return NULL;
         }
 #endif
+
         return shadow_users;
 }
 
