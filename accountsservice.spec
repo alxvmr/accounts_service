@@ -4,7 +4,7 @@
 
 Name: accountsservice
 Version: 23.13.9
-Release: alt3
+Release: alt4
 Summary: D-Bus interfaces for querying and manipulating user account information
 
 Group: System/Base
@@ -126,6 +126,11 @@ mkdir -p %buildroot%_datadir/%name/interfaces
 %_girdir/*.gir
 
 %changelog
+* Wed Aug 07 2024 Maria Alexeeva <alxvmr@altlinux.org> 23.13.9-alt4
+- Fixed a problem with defining local users in Gnome.
+- Reading /etc/shadow changed to reading /etc/tcb/
+- Fixed tests for working with /etc/tcb/
+
 * Mon Jun 24 2024 Alexey Shabalin <shaba@altlinux.org> 23.13.9-alt3
 - Sync with upstream main branch.
 - Add reuires dbus.service to accounts-daemon.service (ALT#50663).
