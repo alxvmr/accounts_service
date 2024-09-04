@@ -4,7 +4,7 @@
 
 Name: accountsservice
 Version: 23.13.9
-Release: alt4
+Release: alt5
 Summary: D-Bus interfaces for querying and manipulating user account information
 
 Group: System/Base
@@ -126,6 +126,11 @@ mkdir -p %buildroot%_datadir/%name/interfaces
 %_girdir/*.gir
 
 %changelog
+* Wed Sep 04 2024 Evgeny Sinelnikov <sin@altlinux.org> 23.13.9-alt5
+- Fixed problem with local users definition (difference with previous
+  release - fixed path to /etc/tcb/ is removed, which allows to work
+  with nsswitch.conf) (thx Maria Alexeeva) (ALT#47499).
+
 * Wed Aug 07 2024 Maria Alexeeva <alxvmr@altlinux.org> 23.13.9-alt4
 - Fixed a problem with defining local users in Gnome.
 - Reading /etc/shadow changed to reading /etc/tcb/
