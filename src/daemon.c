@@ -61,6 +61,7 @@
 
 #define PATH_PASSWD "passwd"
 #define PATH_SHADOW "shadow"
+#define PATH_TCB "tcb"
 #define PATH_GROUP "/etc/group"
 #define PATH_DM     "/etc/systemd/system/display-manager.service"
 
@@ -238,6 +239,58 @@ typedef struct
         char        buf[1024];
 } ShadowEntryBuffers;
 
+static GHashTable * build_shadow_users_tcb_hash (GHashTable *local_users)
+{
+        GHashTable *shadow_users_tcb = NULL;
+
+        struct spwd *shadow_entry;
+        g_autofree char *tcb_path = g_build_filename(get_sysconfdir(), PATH_TCB, NULL);
+        g_autofree char *shadow_tcb_path = NULL;
+        FILE *fp;
+
+        DIR *dir;
+        struct dirent *ent;
+        shadow_users_tcb = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+        dir = opendir(tcb_path);
+        if (dir) {
+                while ((ent = readdir (dir)) != NULL)  {
+                        if (!g_strcmp0 (ent->d_name, ".") || !g_strcmp0 (ent->d_name, "..")){
+                                continue;
+                        }
+
+                        shadow_tcb_path = g_build_filename(tcb_path, ent->d_name, PATH_SHADOW, NULL);
+                        fp = fopen (shadow_tcb_path, "r");
+
+                        if (fp == NULL){
+                                g_warning("Unable to open %s: %s", shadow_tcb_path, g_strerror (errno));
+                                continue;
+                        }
+
+                        int ret = 0;
+                        ShadowEntryBuffers *shadow_entry_buffers = g_malloc0 (sizeof(*shadow_entry_buffers));
+                        ret = fgetspent_r (fp, &shadow_entry_buffers->spbuf, shadow_entry_buffers->buf, sizeof(shadow_entry_buffers->buf), &shadow_entry);
+
+                        if (ret == 0) {
+                                g_hash_table_insert (shadow_users_tcb, g_strdup (shadow_entry->sp_namp), shadow_entry_buffers);
+                                g_hash_table_add (local_users, g_strdup (shadow_entry->sp_namp));
+                        } else {
+                                g_free (shadow_entry_buffers);
+                        }
+
+                        fclose (fp);
+                }
+        }
+
+        (void) closedir (dir);
+
+        if (g_hash_table_size (shadow_users_tcb) == 0) {
+                g_clear_pointer (&shadow_users_tcb, g_hash_table_unref);
+                return NULL;
+        }
+
+        return shadow_users_tcb;
+}
+
 static GHashTable * build_shadow_users_hash (GHashTable *local_users)
 {
         GHashTable *shadow_users = NULL;
@@ -282,6 +335,78 @@ static GHashTable * build_shadow_users_hash (GHashTable *local_users)
         }
 #endif
         return shadow_users;
+}
+
+static void
+entry_generator_tcb (Daemon         *daemon,
+                     GHashTable     *users,
+                     GHashTable     *local_users,
+                     gpointer       *state,
+                     struct passwd **pwent,
+                     struct spwd   **spent,
+                     char          **json)
+{
+        ShadowEntryBuffers *shadow_entry_buffers;
+
+        struct
+        {
+                FILE       *fp;
+                GHashTable *shadow_users_tcb;
+        } *generator_state;
+
+        if (*state == NULL) {
+                GHashTable *shadow_users_tcb = NULL;
+                g_autofree char *passwd_path = NULL;
+                FILE *fp;
+
+                shadow_users_tcb = build_shadow_users_tcb_hash (local_users);
+
+                passwd_path = g_build_filename (get_sysconfdir (), PATH_PASSWD, NULL);
+                fp = fopen (passwd_path, "r");
+                if (fp == NULL) {
+                        g_clear_pointer (&shadow_users_tcb, g_hash_table_unref);
+                        g_warning ("Unable to open %s: %s", passwd_path, g_strerror (errno));
+                        return;
+                }
+
+                generator_state = g_malloc0 (sizeof(*generator_state));
+                generator_state->fp = fp;
+                generator_state->shadow_users_tcb = shadow_users_tcb;
+
+                *state = generator_state;
+        }
+
+        generator_state = *state;
+
+        if (g_hash_table_size (users) < MAX_LOCAL_USERS) {
+                *pwent = fgetpwent (generator_state->fp);
+                if (*pwent != NULL) {
+                        struct passwd *p = *pwent;
+
+                        shadow_entry_buffers = generator_state->shadow_users_tcb
+                                             ? g_hash_table_lookup (generator_state->shadow_users_tcb, p->pw_name)
+                                             : NULL;
+                        *spent = NULL;
+
+                        if (shadow_entry_buffers != NULL) {
+                                *spent = &shadow_entry_buffers->spbuf;
+                        }
+
+                        /* Skip system users... */
+                        if (!user_classify_is_human (p->pw_uid, p->pw_name, p->pw_shell)) {
+                                g_debug ("skipping user: %s", p->pw_name);
+
+                                entry_generator_tcb (daemon, users, local_users, state, pwent, spent, json);
+                        }
+
+                        return;
+                }
+        }
+        fclose (generator_state->fp);
+        if (generator_state->shadow_users_tcb)
+                g_hash_table_unref (generator_state->shadow_users_tcb);
+        g_free (generator_state);
+        *state = NULL;
 }
 
 static void
@@ -771,6 +896,9 @@ reload_users (Daemon *daemon)
          * frozen in load_entries() and then thawed as we process
          * them below.
          */
+
+         /* Load the local users from /etc/tcb into our hash tables */
+        load_entries (daemon, users, local_users, FALSE, entry_generator_tcb);
 
         /* Load the local users into our hash tables */
         load_entries (daemon, users, local_users, FALSE, entry_generator_fgetpwent);
