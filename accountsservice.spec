@@ -4,7 +4,7 @@
 
 Name: accountsservice
 Version: 23.13.9
-Release: alt7
+Release: alt8
 Summary: D-Bus interfaces for querying and manipulating user account information
 
 Group: System/Base
@@ -93,8 +93,8 @@ GObject introspection devel data for the accountsservice library
 mkdir -p %buildroot%_datadir/%name/interfaces
 %find_lang accounts-service
 
-#%check
-#%meson_test
+%check
+%meson_test
 
 %files -f accounts-service.lang
 %doc COPYING README.md AUTHORS
@@ -126,6 +126,9 @@ mkdir -p %buildroot%_datadir/%name/interfaces
 %_girdir/*.gir
 
 %changelog
+* Thu Oct 03 2024 Maria Alexeeva <alxvmr@altlinux.org> 23.13.9-alt8
+- Reworked build_shadow_users_hash function - accepts file path
+
 * Wed Oct 02 2024 Maria Alexeeva <alxvmr@altlinux.org> 23.13.9-alt7
 - Removed generator for /etc/tcb/ and added to build_shadow_users_hash
 
