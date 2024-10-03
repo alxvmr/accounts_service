@@ -229,79 +229,41 @@ typedef struct
         char        buf[1024];
 } ShadowEntryBuffers;
 
-static GHashTable * build_shadow_users_hash (GHashTable *local_users)
+static void
+build_shadow_users_hash (GHashTable *local_users, GHashTable *shadow_users, const gchar *path)
 {
-        GHashTable *shadow_users = NULL;
 
 #ifdef HAVE_SHADOW_H
         struct spwd *shadow_entry;
         g_autofree char *shadow_path = NULL;
-        g_autofree char *shadow_tcb_path = NULL;
-        g_autofree char *tcb_path = g_build_filename(get_sysconfdir(), PATH_TCB, NULL);
         FILE *fp;
-        DIR *dir;
-        struct dirent *ent;
 
-        shadow_users = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
-        shadow_path = g_build_filename (get_sysconfdir (), PATH_SHADOW, NULL);
-
+        shadow_path = g_build_filename (get_sysconfdir (), path, NULL);
         fp = fopen (shadow_path, "r");
-        if (fp) {
-                do {
-                        int ret = 0;
-
-                        ShadowEntryBuffers *shadow_entry_buffers = g_malloc0 (sizeof(*shadow_entry_buffers));
-
-                        ret = fgetspent_r (fp, &shadow_entry_buffers->spbuf, shadow_entry_buffers->buf, sizeof(shadow_entry_buffers->buf), &shadow_entry);
-                        if (ret == 0) {
-                                g_hash_table_insert (shadow_users, g_strdup (shadow_entry->sp_namp), shadow_entry_buffers);
-                                g_hash_table_add (local_users, g_strdup (shadow_entry->sp_namp));
-                        } else {
-                                g_free (shadow_entry_buffers);
-
-                                if (errno != EINTR) {
-                                        break;
-                                }
-                        }
-                } while (shadow_entry != NULL);
-        } else {
+        if (fp == NULL) {
                 g_warning ("Unable to open %s: %s", shadow_path, g_strerror (errno));
         }
 
-        fclose (fp);
+        do {
+                int ret = 0;
 
-        dir = opendir(tcb_path);
-        if (dir) {
-                while ((ent = readdir (dir)) != NULL)  {
-                        if (!g_strcmp0 (ent->d_name, ".") || !g_strcmp0 (ent->d_name, "..")){
-                                continue;
+                ShadowEntryBuffers *shadow_entry_buffers = g_malloc0 (sizeof(*shadow_entry_buffers));
+
+                ret = fgetspent_r (fp, &shadow_entry_buffers->spbuf, shadow_entry_buffers->buf, sizeof(shadow_entry_buffers->buf), &shadow_entry);
+                if (ret == 0) {
+                        g_hash_table_insert (shadow_users, g_strdup (shadow_entry->sp_namp), shadow_entry_buffers);
+                        g_hash_table_add (local_users, g_strdup (shadow_entry->sp_namp));
+                } else {
+                        g_free (shadow_entry_buffers);
+
+                        if (errno != EINTR) {
+                                break;
                         }
-                        shadow_tcb_path = g_build_filename(tcb_path, ent->d_name, PATH_SHADOW, NULL);
-                        fp = fopen (shadow_tcb_path, "r");
-                        if (fp == NULL){
-                                g_warning("Unable to open %s: %s", shadow_tcb_path, g_strerror (errno));
-                                continue;
-                        }
-                        int ret = 0;
-                        ShadowEntryBuffers *shadow_entry_buffers = g_malloc0 (sizeof(*shadow_entry_buffers));
-                        ret = fgetspent_r (fp, &shadow_entry_buffers->spbuf, shadow_entry_buffers->buf, sizeof(shadow_entry_buffers->buf), &shadow_entry);
-                        if (ret == 0) {
-                                g_hash_table_insert (shadow_users, g_strdup (shadow_entry->sp_namp), shadow_entry_buffers);
-                                g_hash_table_add (local_users, g_strdup (shadow_entry->sp_namp));
-                        } else {
-                                g_free (shadow_entry_buffers);
-                        }
-                        fclose (fp);
                 }
-        }
-        (void) closedir (dir);
+        } while (shadow_entry != NULL);
 
-        if (g_hash_table_size (shadow_users) == 0) {
-                g_clear_pointer (&shadow_users, g_hash_table_unref);
-                return NULL;
-        }
+        fclose (fp);
 #endif
-        return shadow_users;
 }
 
 static struct passwd *
@@ -329,9 +291,38 @@ entry_generator_fgetpwent (Daemon       *daemon,
         if (*state == NULL) {
                 GHashTable *shadow_users = NULL;
                 g_autofree char *passwd_path = NULL;
+                g_autofree char *tcb_path = NULL;
+                g_autofree char *shadow_tcb_path = NULL;
                 FILE *fp;
+                DIR *dir;
+                struct dirent *ent;
 
-                shadow_users = build_shadow_users_hash (local_users);
+                shadow_users = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+
+                build_shadow_users_hash (local_users, shadow_users, PATH_SHADOW);
+
+                tcb_path = g_build_filename (get_sysconfdir (), PATH_TCB, NULL);
+                dir = opendir (tcb_path);
+                if (dir) {
+                        while ((ent = readdir (dir)) != NULL) {
+                                if (!g_strcmp0 (ent->d_name, ".") || !g_strcmp0 (ent->d_name, "..")) {
+                                        continue;
+                                }
+
+                                shadow_tcb_path = g_build_filename (PATH_TCB, ent->d_name, PATH_SHADOW, NULL);
+                                build_shadow_users_hash (local_users, shadow_users, shadow_tcb_path);
+
+                        }
+                } else {
+                        g_warning ("Unable to open %s: %s", tcb_path, g_strerror (errno));
+                }
+
+                (void) closedir (dir);
+
+                if (g_hash_table_size (shadow_users) == 0) {
+                        g_clear_pointer (&shadow_users, g_hash_table_unref);
+                        shadow_users = NULL;
+                }
 
                 passwd_path = g_build_filename (get_sysconfdir (), PATH_PASSWD, NULL);
                 fp = fopen (passwd_path, "r");
